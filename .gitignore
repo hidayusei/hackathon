@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+data/raw/
+data/features/
+data/recordings/
+logs/
+config/local.yaml
+scripts/logs/
+scripts/.codex-progress.json

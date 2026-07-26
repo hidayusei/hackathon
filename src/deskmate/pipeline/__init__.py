@@ -1,0 +1,1 @@
+"""DeskMate event-processing pipeline."""

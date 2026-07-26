@@ -1,0 +1,115 @@
+version: 1
+app:
+  locale: ja
+  autostart_pipeline: true
+  show_share_window: false
+sensor: {width: 320, height: 320}
+input:
+  source: dummy
+  poll_timeout_ms: 50
+  stall_timeout_ms: 1500
+  disconnect_timeout_ms: 5000
+  reconnect_interval_ms: 3000
+  max_open_retries: 10
+  dummy:
+    mode: demo
+    scenario: keyboard_steady
+    loop: true
+    seed: 20260726
+    batch_interval_ms: 20
+    rate_scale: 1.0
+  file: {path: null, speed: 1.0, loop: true}
+  hdf5: {path: null, events_dataset: /events, speed: 1.0, loop: false}
+pipeline: {queue_size: 64, queue_overflow: drop_oldest}
+window:
+  window_ms: 200
+  stride_ms: 200
+  max_events_per_window: 200000
+  grid_cols: 16
+  grid_rows: 16
+regions:
+  - {id: keyboard, rect: [0.25, 0.62, 0.75, 1.00]}
+  - {id: mouse, rect: [0.75, 0.60, 1.00, 1.00]}
+  - {id: center, rect: [0.30, 0.25, 0.70, 0.62]}
+  - {id: left, rect: [0.00, 0.00, 0.30, 0.62]}
+  - {id: right, rect: [0.70, 0.00, 1.00, 0.60]}
+features:
+  ema_short_seconds: 1.0
+  ema_long_seconds: 10.0
+  history_seconds: 60.0
+  bbox_percentile: 0.05
+  voxel: {enabled: false, time_bins: 4, spatial_scale: 4}
+estimation:
+  estimator: rule
+  model_path: null
+  warmup_seconds: 3.0
+  idle_eps: 100.0
+  low_activity_eps: 400.0
+  focus_min_eps: 400.0
+  active_eps: 2000.0
+  high_activity_eps: 5000.0
+  no_motion_seconds: 20.0
+  focus_regions: [keyboard, mouse]
+  focus_region_share: 0.60
+  focus_min_seconds: 5.0
+  focus_max_bbox_area_ratio: 0.20
+  focus_max_activity_cv: 0.60
+  organizing_bbox_area_ratio: 0.25
+  organizing_active_cell_ratio: 0.25
+  organizing_centroid_speed: 35.0
+  break_max_eps: 600.0
+  break_decay_ratio: 0.40
+  transition_change_score: 0.55
+  transition_max_seconds: 6.0
+  noise_ratio_threshold: 0.79
+smoothing:
+  vote_window_size: 5
+  vote_min_count: 3
+  enter_confidence: 0.50
+  exit_confidence: 0.35
+  confidence_ema_seconds: 2.0
+  display_confidence_floor: 0.45
+  min_dwell_seconds: {default: 3.0, transition: 2.0, no_motion: 5.0, unknown: 2.0}
+share:
+  enabled: true
+  min_confidence: 0.50
+  approachable_after_break_seconds: 10.0
+  recent_busy_lookback_seconds: 120.0
+  prefer_later_min_seconds: 30.0
+  update_interval_ms: 1000
+  min_hold_seconds: 5.0
+character:
+  renderer: shape
+  assets_dir: assets/character
+  loop_period_seconds: 2.0
+  transition_ms: 350
+  fps: 20
+ui:
+  theme: dark
+  widget:
+    width: 460
+    height: 250
+    opacity: 0.96
+    show_confidence: true
+    show_history: true
+    show_privacy_notice: true
+    character_size: 132
+    minimized_size: 96
+    last_position: null
+    minimized: false
+  detail: {max_preview_points: 5000, history_seconds: 300, refresh_hz: 10, character_size: 96}
+  share: {width: 480, height: 320, character_size: 96, fullscreen: false}
+privacy:
+  save_raw_events: false
+  save_features: false
+  history_retention_minutes: 60
+  allow_external_send: false
+  show_caveat: true
+logging:
+  level: INFO
+  file_enabled: true
+  dir: null
+  max_bytes: 1048576
+  backup_count: 3
+  log_features: false
+debug: {enabled: false, force_status: null}

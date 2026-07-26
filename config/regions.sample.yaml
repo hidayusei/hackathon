@@ -1,0 +1,5 @@
+regions:
+  - id: keyboard
+    rect: [0.25, 0.62, 0.75, 1.00]
+  - id: mouse
+    rect: [0.75, 0.60, 1.00, 1.00]

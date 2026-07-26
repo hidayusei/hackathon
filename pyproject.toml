@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deskmate"
+version = "0.1.0"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "PySide6>=6.8,<7",
+    "numpy>=1.26",
+    "pyqtgraph>=0.13.7",
+    "pydantic>=2.7,<3",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-qt>=4.4"]
+hdf5 = ["h5py>=3.11"]
+ml = ["scikit-learn>=1.5"]
+
+[project.scripts]
+deskmate = "deskmate.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

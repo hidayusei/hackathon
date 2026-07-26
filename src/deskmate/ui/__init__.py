@@ -1,0 +1,1 @@
+"""DeskMate Qt user interface."""
