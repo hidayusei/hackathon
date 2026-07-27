@@ -28,7 +28,6 @@ class FeatureTablePanel(QWidget):
                 "speed_short": f"{detail.smoothed.speed_short:.3f}",
                 "cell_short": f"{detail.smoothed.cell_short:.3f}",
                 "rate_cv_10s": f"{detail.smoothed.rate_cv_10s:.3f}",
-                "change_score": f"{detail.smoothed.change_score:.3f}",
                 "elapsed_seconds": f"{detail.smoothed.elapsed_seconds:.3f}",
             }
         )

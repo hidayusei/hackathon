@@ -45,7 +45,7 @@ class FeatureHistory:
         return result
 
     def update(self, frame: FeatureFrame) -> SmoothedFeatures:
-        """Update EMA, coefficient of variation, and change score."""
+        """Update EMA values and coefficient of variation."""
         g = frame.global_features
         d = frame.duration_s
         self._elapsed += d
@@ -73,23 +73,11 @@ class FeatureHistory:
             self._rates.popleft()
         rates = np.asarray([rate for _, rate in self._rates])
         rate_cv = float(rates.std() / rates.mean()) if rates.size and rates.mean() > 0 else 999.0
-        c1 = np.clip(
-            abs(rate_short - rate_long) / max(rate_long, self._estimation.idle_eps), 0, 1
-        )
-        diag = math.hypot(self._sensor.width, self._sensor.height)
-        c2 = np.clip(math.hypot(csx - clx, csy - cly) / (0.25 * diag), 0, 1)
-        c3 = np.clip(abs(area_short - area_long), 0, 1)
-        c4 = np.clip(
-            0.5 * sum(abs(self._share_short[r] - self._share_long[r]) for r in REGION_ORDER),
-            0,
-            1,
-        )
-        change_score = float(0.35 * c1 + 0.25 * c2 + 0.15 * c3 + 0.25 * c4)
         self._initialized = True
         return SmoothedFeatures(
             rate_short, rate_long, csx, csy, clx, cly, area_short, area_long,
             speed_short, cell_short, dict(self._share_short), dict(self._share_long),
-            rate_cv, change_score, g.idle_seconds, g.active_seconds,
+            rate_cv, g.idle_seconds, g.active_seconds,
             g.activity_ratio_10s, g.noise_ratio, self._elapsed,
         )
 

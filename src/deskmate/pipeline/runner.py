@@ -13,7 +13,6 @@ from deskmate.config.schema import AppConfig
 from deskmate.core.clock import Clock, SystemClock
 from deskmate.core.enums import (
     AnimationId,
-    Approachability,
     DeskStatus,
     SourceStatus,
     SystemStatus,
@@ -28,7 +27,7 @@ from deskmate.core.types import (
 )
 from deskmate.input.factory import create_event_source
 
-from .approachability import ApproachabilityResolver
+from .break_tracker import BreakTracker
 from .duration import DurationTracker
 from .estimator import create_estimator
 from .features import FeatureExtractor
@@ -71,13 +70,11 @@ class PipelineRunner(QObject):
         )
         self.history = FeatureHistory(config.features, config.estimation, config.sensor)
         self.estimator = create_estimator(config.estimation)
-        self.smoother = StatusSmoother(
-            config.smoothing, self.clock, config.estimation.transition_max_seconds
-        )
+        self.smoother = StatusSmoother(config.smoothing, self.clock)
         self.duration = DurationTracker(
             history_retention_minutes=config.privacy.history_retention_minutes
         )
-        self.approachability = ApproachabilityResolver(config.share, self.clock)
+        self.break_tracker = BreakTracker(config.break_prompt, self.clock)
         self.source = None
         self._running = False
         self._paused = False
@@ -98,7 +95,7 @@ class PipelineRunner(QObject):
         self.estimator.reset()
         self.smoother.reset()
         self.duration.reset()
-        self.approachability.reset()
+        self.break_tracker.reset()
         self._system_status = SystemStatus.STARTING
 
     @Slot()
@@ -107,11 +104,16 @@ class PipelineRunner(QObject):
         if self._running:
             return
         self.source = create_event_source(self.config.input, self.config.sensor)
-        self.source.open()
         self._running = True
-        self.stats.source_name = self.source.name
-        self.stats.source_status = self.source.status
-        self.source_state.emit(self.source.status.value, self.source.name)
+        self.stats.source_name = self._source_display_name()
+        try:
+            self.source.open()
+            self.stats.source_status = self.source.status
+            self.source_state.emit(
+                self.source.status.value, self.stats.source_name
+            )
+        except SourceError as exc:
+            self._handle_source_error(exc)
         self._loop()
 
     @Slot()
@@ -164,6 +166,24 @@ class PipelineRunner(QObject):
         if self.source is not None:
             self.source.reset()
             self._reset_components()
+
+    @Slot()
+    def snooze_break(self) -> None:
+        """Snooze an active break prompt."""
+
+        self.break_tracker.snooze(self.clock.monotonic())
+
+    @Slot()
+    def acknowledge_break(self) -> None:
+        """Acknowledge the prompt and reset focused time."""
+
+        self.break_tracker.acknowledge(self.clock.monotonic())
+
+    def _source_display_name(self) -> str:
+        if self.source is None:
+            return ""
+        reason = getattr(self.source, "resolution_reason", "")
+        return f"{self.source.name} - {reason}" if reason else self.source.name
 
     def _loop(self) -> None:
         idle_wait = self.config.input.poll_timeout_ms / 1000
@@ -242,46 +262,31 @@ class PipelineRunner(QObject):
             return
         self._last_data_at = now
         self.stats.source_status = self.source.status
+        self.stats.source_name = self._source_display_name()
         for window in self.windower.push(batch):
             self._process_window(window)
 
     def _status_label(
         self,
         status: DeskStatus,
-        confidence: float,
-        duration: float,
         system: SystemStatus,
     ) -> str:
         try:
             from deskmate.ui.labels import resolve_label
 
-            return resolve_label(
-                status,
-                confidence,
-                duration,
-                system,
-                floor=self.config.smoothing.display_confidence_floor,
-            )
+            return resolve_label(status, system)
         except ImportError:
             return status.value if system is SystemStatus.RUNNING else system.value
 
     def _animation(
-        self, status: DeskStatus, duration: float, system: SystemStatus
+        self, status: DeskStatus, break_due: bool, system: SystemStatus
     ) -> AnimationId:
         try:
             from deskmate.character.mapping import resolve_animation
 
-            return resolve_animation(status, duration, system)
+            return resolve_animation(status, break_due, system)
         except ImportError:
-            return AnimationId.UNKNOWN
-
-    def _approachability_label(self, value: Approachability) -> str:
-        try:
-            from deskmate.ui.labels import APPROACHABILITY_LABELS_JA
-
-            return APPROACHABILITY_LABELS_JA[value]
-        except ImportError:
-            return value.value
+            return AnimationId.SITTING
 
     def _process_window(self, window: EventWindow) -> StatusSnapshot:
         """Synchronously process one window; exposed for deterministic tests."""
@@ -297,26 +302,24 @@ class PipelineRunner(QObject):
         result = self.smoother.update(
             estimate,
             now,
-            force_no_motion=smoothed.idle_seconds >= self.config.estimation.no_motion_seconds,
+            force_away=smoothed.idle_seconds >= self.config.estimation.away_seconds,
         )
         duration = self.duration.update(result.status, result.changed, result.confidence, now)
-        approach = self.approachability.resolve(
+        break_state = self.break_tracker.update(
             result.status,
             self._system_status,
-            duration,
-            result.confidence,
-            self.duration,
+            window.duration_s,
             now,
         )
         snapshot = StatusSnapshot(
             result.status,
             self._system_status,
-            self._status_label(result.status, result.confidence, duration, self._system_status),
-            self._animation(result.status, duration, self._system_status),
+            self._status_label(result.status, self._system_status),
+            self._animation(result.status, break_state.break_due, self._system_status),
             duration,
             result.confidence,
-            approach,
-            self._approachability_label(approach),
+            break_state.focus_streak_seconds,
+            break_state.break_due,
             result.changed,
             self.clock.now(),
         )
@@ -358,17 +361,17 @@ class PipelineRunner(QObject):
         return int(size // limit) + 1
 
     def _emit_system_snapshot(self, status: SystemStatus) -> None:
-        base_status = DeskStatus.UNKNOWN
+        base_status = DeskStatus.IDLE
         changed = self._last_snapshot is None or self._last_snapshot.system_status is not status
         snapshot = StatusSnapshot(
             base_status,
             status,
-            self._status_label(base_status, 0.0, 0.0, status),
-            self._animation(base_status, 0.0, status),
+            self._status_label(base_status, status),
+            self._animation(base_status, False, status),
             0.0,
             0.0,
-            Approachability.UNDETERMINED,
-            self._approachability_label(Approachability.UNDETERMINED),
+            self.break_tracker.state.focus_streak_seconds,
+            False,
             changed,
             self.clock.now(),
         )
@@ -379,6 +382,9 @@ class PipelineRunner(QObject):
         LOGGER.error("input source error: %s", exc)
         self._system_status = SystemStatus.NO_SIGNAL
         self.error_occurred.emit(type(exc).__name__, str(exc))
+        self.source_state.emit(
+            SourceStatus.ERROR.value, self._source_display_name()
+        )
         self._emit_system_snapshot(SystemStatus.NO_SIGNAL)
         if self.source is None:
             return

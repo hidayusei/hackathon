@@ -4,15 +4,11 @@ from enum import Enum
 
 
 class DeskStatus(str, Enum):
-    """An abstract desk activity state."""
+    """Desk activity inferred from event-camera motion."""
 
+    AWAY = "away"
     FOCUSED = "focused"
-    WORKING = "working"
-    ORGANIZING = "organizing"
-    SHORT_BREAK = "short_break"
-    TRANSITION = "transition"
-    NO_MOTION = "no_motion"
-    UNKNOWN = "unknown"
+    IDLE = "idle"
 
 
 class SystemStatus(str, Enum):
@@ -22,7 +18,6 @@ class SystemStatus(str, Enum):
     RUNNING = "running"
     NO_SIGNAL = "no_signal"
     PAUSED = "paused"
-    SHARING_OFF = "sharing_off"
     ERROR = "error"
 
 
@@ -38,25 +33,12 @@ class RegionId(str, Enum):
 
 
 class AnimationId(str, Enum):
-    """Character animation identifier."""
+    """Character GIF identifier."""
 
-    WORKING_AT_DESK = "working_at_desk"
-    TYPING = "typing"
-    ORGANIZING_DESK = "organizing_desk"
-    DRINKING_TEA = "drinking_tea"
-    RESTING = "resting"
-    LOOKING_AROUND = "looking_around"
+    RUNNING = "running"
+    SITTING = "sitting"
     SLEEPING = "sleeping"
-    TRANSITIONING = "transitioning"
-    UNKNOWN = "unknown"
-
-
-class Approachability(str, Enum):
-    """Secondary, deliberately uncertain approachability indicator."""
-
-    LIKELY_OK = "likely_ok"
-    PREFER_LATER = "prefer_later"
-    UNDETERMINED = "undetermined"
+    BREAK = "break"
 
 
 class SourceStatus(str, Enum):
@@ -74,10 +56,9 @@ class SourceStatus(str, Enum):
 class SourceKind(str, Enum):
     """Configured input source implementation."""
 
+    AUTO = "auto"
+    METAVISION = "metavision"
+    REPLAY = "replay"
     DUMMY = "dummy"
     FILE = "file"
     HDF5 = "hdf5"
-    WEBSOCKET = "websocket"
-    TCP = "tcp"
-    UDP = "udp"
-    HTTP = "http"

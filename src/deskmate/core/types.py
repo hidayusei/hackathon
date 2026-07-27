@@ -8,7 +8,6 @@ import numpy as np
 
 from .enums import (
     AnimationId,
-    Approachability,
     DeskStatus,
     RegionId,
     SourceStatus,
@@ -230,7 +229,6 @@ class SmoothedFeatures:
     share_short: dict[RegionId, float]
     share_long: dict[RegionId, float]
     rate_cv_10s: float
-    change_score: float
     idle_seconds: float
     active_seconds: float
     activity_ratio_10s: float
@@ -268,8 +266,8 @@ class StatusSnapshot:
     animation: AnimationId
     duration_seconds: float
     confidence: float
-    approachability: Approachability
-    approachability_label: str
+    focus_streak_seconds: float
+    break_due: bool
     changed: bool
     updated_at: datetime
 
@@ -280,9 +278,8 @@ class StatusSnapshot:
             "label": self.label,
             "animation": self.animation.value,
             "duration_seconds": self.duration_seconds,
-            "confidence": self.confidence,
-            "approachability": self.approachability.value,
-            "approachability_label": self.approachability_label,
+            "focus_streak_seconds": self.focus_streak_seconds,
+            "break_due": self.break_due,
             "system_status": self.system_status.value,
             "updated_at": self.updated_at.isoformat(),
         }

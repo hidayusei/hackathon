@@ -16,8 +16,13 @@ DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "default.
 
 
 def user_config_path() -> Path:
-    """Return the per-user configuration path."""
-    root = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    """Return the native per-user configuration path on Windows or Linux."""
+
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        root = Path(appdata)
+    else:
+        root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
     return root / "DeskMate" / "config.yaml"
 
 

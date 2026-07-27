@@ -52,42 +52,52 @@ def _scenario(
 
 
 SCENARIOS: dict[str, ScenarioSpec] = {
-    "keyboard_steady": _scenario(
-        "keyboard_steady", 1400.0, 0.15, ((0.50, 0.82),), 22.0,
-        drift_px_per_s=1.0, uniform_noise_ratio=0.03,
+    "keyboard_focus": _scenario(
+        "keyboard_focus",
+        1400.0,
+        0.15,
+        ((0.50, 0.82),),
+        22.0,
+        drift_px_per_s=1.0,
+        uniform_noise_ratio=0.03,
     ),
     "mouse_intermittent": _scenario(
-        # Bursts must be shorter than features.ema_short_seconds, otherwise rate_short
-        # collapses between them and the estimator reports short_break instead of the
-        # intended focused/working pair. See status-definition.md 5.5.
-        "mouse_intermittent", 2000.0, 0.25, ((0.86, 0.80),), 17.0,
-        burst_period_s=1.0, burst_duty=0.60, drift_px_per_s=3.0,
-        positive_ratio=0.52, uniform_noise_ratio=0.03,
+        "mouse_intermittent",
+        2000.0,
+        0.25,
+        ((0.86, 0.80),),
+        17.0,
+        burst_period_s=1.0,
+        burst_duty=0.60,
+        drift_px_per_s=3.0,
+        positive_ratio=0.52,
+        uniform_noise_ratio=0.03,
     ),
-    "desk_wide_active": _scenario(
-        "desk_wide_active", 4000.0, 0.30,
-        ((0.20, 0.35), (0.50, 0.45), (0.80, 0.30), (0.45, 0.75)), 60.0,
-        center_switch_s=1.2, drift_px_per_s=22.0, uniform_noise_ratio=0.06,
-    ),
-    "activity_decay": _scenario(
-        "activity_decay", 2000.0, 0.15, ((0.50, 0.80),), 25.0,
-        drift_px_per_s=2.0, uniform_noise_ratio=0.03, rate_decay_per_s=0.88,
+    "desk_wide": _scenario(
+        "desk_wide",
+        4000.0,
+        0.30,
+        ((0.20, 0.35), (0.50, 0.45), (0.80, 0.30), (0.45, 0.75)),
+        60.0,
+        center_switch_s=1.2,
+        drift_px_per_s=22.0,
+        uniform_noise_ratio=0.06,
     ),
     "quiet": _scenario(
-        "quiet", 20.0, 0.50, ((0.50, 0.50),), 110.0, uniform_noise_ratio=1.0,
-    ),
-    "rapid_change": _scenario(
-        "rapid_change", 3000.0, 0.55,
-        ((0.50, 0.82), (0.20, 0.30), (0.85, 0.35), (0.50, 0.45)), 40.0,
-        burst_period_s=1.5, burst_duty=0.5, center_switch_s=0.8,
-        drift_px_per_s=45.0, uniform_noise_ratio=0.05,
-    ),
-    "noise_burst": _scenario(
-        "noise_burst", 6000.0, 0.60, ((0.50, 0.50),), 150.0,
-        uniform_noise_ratio=0.92,
+        "quiet",
+        20.0,
+        0.50,
+        ((0.50, 0.50),),
+        110.0,
+        uniform_noise_ratio=1.0,
     ),
     "dropout": _scenario(
-        "dropout", 0.0, 0.0, ((0.50, 0.50),), 0.0, dropout=True,
+        "dropout",
+        0.0,
+        0.0,
+        ((0.50, 0.50),),
+        0.0,
+        dropout=True,
     ),
 }
 
@@ -101,14 +111,10 @@ class DemoStep:
 
 
 DEMO_SEQUENCE: tuple[DemoStep, ...] = (
-    DemoStep("keyboard_steady", 45.0),
-    DemoStep("mouse_intermittent", 40.0),
-    DemoStep("rapid_change", 25.0),
-    DemoStep("desk_wide_active", 40.0),
-    DemoStep("activity_decay", 45.0),
-    DemoStep("quiet", 50.0),
-    DemoStep("keyboard_steady", 35.0),
-    DemoStep("activity_decay", 25.0),
-    DemoStep("noise_burst", 20.0),
+    DemoStep("keyboard_focus", 50.0),
+    DemoStep("mouse_intermittent", 35.0),
+    DemoStep("desk_wide", 30.0),
+    DemoStep("quiet", 55.0),
+    DemoStep("keyboard_focus", 25.0),
     DemoStep("dropout", 15.0),
 )

@@ -82,24 +82,16 @@ def _run_scenario(scenario: str, seconds: float):
 
 
 def test_keyboard_scenario_finishes_focused() -> None:
-    assert _run_scenario("keyboard_steady", 30)[-1].status is DeskStatus.FOCUSED
+    assert _run_scenario("keyboard_focus", 30)[-1].status is DeskStatus.FOCUSED
 
 
-def test_wide_scenario_finishes_organizing() -> None:
-    assert _run_scenario("desk_wide_active", 30)[-1].status is DeskStatus.ORGANIZING
+def test_wide_scenario_finishes_idle() -> None:
+    assert _run_scenario("desk_wide", 30)[-1].status is DeskStatus.IDLE
 
 
-def test_quiet_scenario_finishes_no_motion() -> None:
-    assert _run_scenario("quiet", 40)[-1].status is DeskStatus.NO_MOTION
+def test_quiet_scenario_finishes_away() -> None:
+    assert _run_scenario("quiet", 40)[-1].status is DeskStatus.AWAY
 
 
-def test_decay_scenario_visits_short_break() -> None:
-    assert DeskStatus.SHORT_BREAK in {s.status for s in _run_scenario("activity_decay", 20)}
-
-
-def test_rapid_scenario_visits_transition() -> None:
-    assert DeskStatus.TRANSITION in {s.status for s in _run_scenario("rapid_change", 15)}
-
-
-def test_noise_scenario_has_uncertain_display() -> None:
-    assert "状態不明" in {s.label for s in _run_scenario("noise_burst", 15)}
+def test_mouse_scenario_stays_idle() -> None:
+    assert _run_scenario("mouse_intermittent", 20)[-1].status is DeskStatus.IDLE

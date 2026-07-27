@@ -6,11 +6,13 @@ from PySide6.QtWidgets import QGridLayout, QLabel, QMainWindow, QVBoxLayout, QWi
 
 from deskmate.character.renderer import create_renderer
 from deskmate.config.schema import AppConfig
+from deskmate.core.enums import DeskStatus
 from deskmate.core.types import DetailFrame, StatusSnapshot
 
 from .bridge import UiBridge
 from .character_view import CharacterView
 from .labels import (
+    AWAY_NOTE_JA,
     CANDIDATE_JA,
     CURRENT_STATUS_JA,
     DETAIL_CAVEAT_JA,
@@ -40,11 +42,15 @@ class StatusHeader(QWidget):
         self.character = character
         self.status = QLabel()
         self.rule = QLabel()
+        self.note = QLabel()
+        self.note.setObjectName("awayNote")
+        self.note.setWordWrap(True)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(CURRENT_STATUS_JA))
         layout.addWidget(character)
         layout.addWidget(self.status)
         layout.addWidget(self.rule)
+        layout.addWidget(self.note)
 
     def update_frame(self, detail: DetailFrame) -> None:
         """Update state header from one private frame."""
@@ -57,6 +63,11 @@ class StatusHeader(QWidget):
         self.rule.setText(
             f"{RULE_JA}: {detail.estimate.rule_id} {detail.estimate.reason}\n"
             f"{CANDIDATE_JA}: {detail.estimate.status.value}"
+        )
+        # The "away" caveat lives here, on the explanatory screen only, so the
+        # main window stays clean (status-definition.md 10.1).
+        self.note.setText(
+            AWAY_NOTE_JA if snapshot.status is DeskStatus.AWAY else ""
         )
 
 
@@ -86,7 +97,6 @@ class DetailWindow(QMainWindow):
         character = CharacterView(
             create_renderer(config.character, resolve_theme(config.ui.theme)),
             config.ui.detail.character_size,
-            fps=config.character.fps,
         )
         self.status_header = StatusHeader(character)
         grid.addWidget(self.event_panel, 0, 0)

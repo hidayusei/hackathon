@@ -14,7 +14,6 @@ from .labels import (
     DETAIL_BUTTON_JA,
     PAUSE_BUTTON_JA,
     QUIT_BUTTON_JA,
-    SHARE_BUTTON_JA,
     WINDOW_TITLE_JA,
     format_duration,
 )
@@ -22,18 +21,14 @@ from .theme import status_color
 
 
 def build_status_icon(status: DeskStatus, size: int = 32) -> QIcon:
-    """Draw a filled circle in the state accent colour.
+    """Draw a state-coloured tray circle."""
 
-    Generated rather than shipped as a file so the tray needs no binary asset and
-    always agrees with STATUS_COLORS.
-    """
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    accent = QColor(status_color(status))
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(accent)
+    painter.setBrush(QColor(status_color(status)))
     inset = size * 0.14
     painter.drawEllipse(
         QPointF(size / 2, size / 2), size / 2 - inset, size / 2 - inset
@@ -43,37 +38,35 @@ def build_status_icon(status: DeskStatus, size: int = 32) -> QIcon:
 
 
 class TrayIcon(QSystemTrayIcon):
-    """Expose detail, sharing, pause, widget, and quit actions."""
+    """Expose the main window, detail view, pause, and quit actions."""
 
     def __init__(
         self,
         bridge: UiBridge,
         widget: QWidget,
         show_detail: Callable[[], None],
-        show_share: Callable[[], None],
         quit_app: Callable[[], None],
     ) -> None:
-        super().__init__(build_status_icon(DeskStatus.UNKNOWN), widget)
+        super().__init__(build_status_icon(DeskStatus.IDLE), widget)
         self._widget = widget
         self.setToolTip(WINDOW_TITLE_JA)
         menu = QMenu()
         show_widget = QAction(WINDOW_TITLE_JA, menu)
         detail = QAction(DETAIL_BUTTON_JA, menu)
-        share = QAction(SHARE_BUTTON_JA, menu)
         pause = QAction(PAUSE_BUTTON_JA, menu)
         quit_action = QAction(QUIT_BUTTON_JA, menu)
         show_widget.triggered.connect(self._show_widget)
         detail.triggered.connect(show_detail)
-        share.triggered.connect(show_share)
         pause.triggered.connect(lambda: bridge.set_paused(True))
         quit_action.triggered.connect(quit_app)
-        menu.addActions([show_widget, detail, share, pause, quit_action])
+        menu.addActions([show_widget, detail, pause, quit_action])
         self.setContextMenu(menu)
         self.activated.connect(self._on_activated)
         bridge.snapshot_updated.connect(self.apply_snapshot)
 
     def apply_snapshot(self, snapshot: StatusSnapshot) -> None:
-        """Recolour the tray icon and show the state in its tooltip."""
+        """Update tray colour and tooltip."""
+
         self.setIcon(build_status_icon(snapshot.status))
         self.setToolTip(
             f"{WINDOW_TITLE_JA} — {snapshot.label} "

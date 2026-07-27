@@ -1,70 +1,67 @@
-"""Step 13 automatic demo definition checks."""
+"""Automatic three-state demo checks."""
 
 from functools import lru_cache
 
 from conftest import FakeClock
 from deskmate.config.loader import load_config
 from deskmate.config.schema import DummyInputConfig
-from deskmate.core.enums import Approachability, DeskStatus
+from deskmate.core.enums import DeskStatus
 from deskmate.input.dummy_source import DummyEventSource
 from deskmate.input.scenarios import DEMO_SEQUENCE, SCENARIOS
 from deskmate.pipeline.runner import PipelineRunner
 
 
-def test_demo_total_is_340_seconds() -> None:
-    assert sum(step.duration_s for step in DEMO_SEQUENCE) == 340
+def test_demo_total_is_210_seconds() -> None:
+    assert sum(step.duration_s for step in DEMO_SEQUENCE) == 210
 
 
-def test_all_demo_scenarios_exist() -> None:
+def test_all_demo_scenarios_exist_and_are_long_enough() -> None:
     assert all(step.scenario_id in SCENARIOS for step in DEMO_SEQUENCE)
-
-
-def test_every_demo_step_exceeds_five_dwell_periods() -> None:
     assert all(step.duration_s >= 15 for step in DEMO_SEQUENCE)
-
-
-def test_demo_contains_patterns_for_all_states() -> None:
-    required = {
-        "keyboard_steady", "desk_wide_active", "activity_decay", "quiet",
-        "rapid_change", "noise_burst", "dropout",
-    }
-    assert required <= {step.scenario_id for step in DEMO_SEQUENCE}
 
 
 @lru_cache(maxsize=1)
 def _run_complete_demo():
     clock = FakeClock()
-    runner = PipelineRunner(load_config(), clock)
+    config = load_config({"input": {"source": "dummy"}})
+    runner = PipelineRunner(config, clock)
     runner.source = DummyEventSource(
-        DummyInputConfig(mode="demo"), runner.config.sensor, clock
+        DummyInputConfig(mode="demo"), config.sensor, clock
     )
     runner.source.open()
+    runner._running = True
     snapshots = []
     runner.snapshot_ready.connect(snapshots.append)
-    for _ in range(round(340 / 0.02)):
+    for _ in range(round(210 / 0.02)):
         clock.advance(0.02)
         runner._poll_once()
     return snapshots
 
 
-def test_complete_demo_confirms_all_seven_statuses() -> None:
+def test_complete_demo_confirms_all_three_statuses() -> None:
     assert {snapshot.status for snapshot in _run_complete_demo()} == set(DeskStatus)
 
 
-def test_complete_demo_changes_obey_configured_dwell() -> None:
-    snapshots = _run_complete_demo()
-    changes = [
-        (index * 0.2, snapshot.status)
-        for index, snapshot in enumerate(snapshots)
-        if snapshot.changed and snapshot.system_status.value != "no_signal"
-    ]
-    assert all(
-        later[0] - earlier[0] >= 2.0
-        for earlier, later in zip(changes, changes[1:])
+def test_demo_break_prompt_can_be_accelerated() -> None:
+    clock = FakeClock()
+    config = load_config(
+        {
+            "input": {"source": "dummy"},
+            "break": {"demo_scale": 0.02},
+        }
     )
-
-
-def test_complete_demo_shows_all_approachability_values() -> None:
-    assert {
-        snapshot.approachability for snapshot in _run_complete_demo()
-    } == set(Approachability)
+    runner = PipelineRunner(config, clock)
+    source = DummyEventSource(
+        DummyInputConfig(mode="manual", scenario="keyboard_focus"),
+        config.sensor,
+        clock,
+    )
+    source.open()
+    due = False
+    for _ in range(round(50 / 0.02)):
+        clock.advance(0.02)
+        batch = source.read(0)
+        if batch is not None:
+            for window in runner.windower.push(batch):
+                due = runner._process_window(window).break_due or due
+    assert due

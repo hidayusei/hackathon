@@ -76,19 +76,3 @@ class DurationTracker:
             for entry in self.history
             if (entry.ended_monotonic if entry.ended_monotonic is not None else now) >= cutoff
         ]
-
-    def had_status_within(
-        self,
-        statuses: set[DeskStatus],
-        seconds: float,
-        now: float,
-        exclude_current: bool = True,
-    ) -> bool:
-        """Return whether a selected status occurred in the recent interval."""
-        entries = self._entries if exclude_current else self.history
-        cutoff = now - seconds
-        return any(
-            entry.status in statuses
-            and (entry.ended_monotonic if entry.ended_monotonic is not None else now) >= cutoff
-            for entry in entries
-        )

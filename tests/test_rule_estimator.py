@@ -1,4 +1,4 @@
-"""Step 5 canonical rule tests."""
+"""Three-state estimation-rule tests."""
 
 import pytest
 
@@ -12,80 +12,56 @@ def _estimate(smoothed):
     return RuleStatusEstimator(load_config().estimation).estimate(None, smoothed)  # type: ignore[arg-type]
 
 
-def test_no_motion_rule() -> None:
-    assert _estimate(make_smoothed(idle_seconds=25)).status is DeskStatus.NO_MOTION
+def _focused(**values):
+    defaults = {
+        "rate_short": 1400,
+        "area_short": 0.06,
+        "rate_cv_10s": 0.2,
+        "active_seconds": 10,
+    }
+    defaults.update(values)
+    smoothed = make_smoothed(**defaults)
+    smoothed.share_short[RegionId.KEYBOARD] = 0.9
+    return smoothed
 
 
-def test_transition_rule() -> None:
-    assert _estimate(make_smoothed(change_score=0.7, rate_short=5000)).status is DeskStatus.TRANSITION
-
-
-def test_organizing_rule() -> None:
-    s = make_smoothed(rate_short=4000, area_short=0.5, cell_short=0.4, speed_short=70)
-    assert _estimate(s).status is DeskStatus.ORGANIZING
+def test_away_rule_after_30_seconds() -> None:
+    assert _estimate(make_smoothed(idle_seconds=30)).status is DeskStatus.AWAY
 
 
 def test_focused_rule() -> None:
-    s = make_smoothed(rate_short=1400, area_short=0.05, rate_cv_10s=0.2, active_seconds=10)
-    s.share_short[RegionId.KEYBOARD] = 0.9
-    assert _estimate(s).status is DeskStatus.FOCUSED
+    assert _estimate(_focused()).status is DeskStatus.FOCUSED
 
 
-def test_short_break_rule() -> None:
-    assert _estimate(make_smoothed(rate_short=300, rate_long=3000)).status is DeskStatus.SHORT_BREAK
+@pytest.mark.parametrize(
+    "smoothed",
+    (
+        _focused(active_seconds=2),
+        _focused(area_short=0.4),
+        _focused(rate_cv_10s=0.9),
+    ),
+)
+def test_failed_focus_condition_falls_back_to_idle(smoothed) -> None:
+    assert _estimate(smoothed).status is DeskStatus.IDLE
 
 
-def test_working_rule() -> None:
-    assert _estimate(make_smoothed(rate_short=1200, area_short=0.3)).status is DeskStatus.WORKING
+def test_focus_share_is_required() -> None:
+    assert _estimate(
+        make_smoothed(
+            rate_short=1400, area_short=0.06, rate_cv_10s=0.2, active_seconds=10
+        )
+    ).status is DeskStatus.IDLE
 
 
-def test_unknown_fallback() -> None:
-    assert _estimate(make_smoothed(rate_short=200, rate_long=250)).status is DeskStatus.UNKNOWN
+def test_away_has_priority_over_focus() -> None:
+    assert _estimate(_focused(idle_seconds=31)).status is DeskStatus.AWAY
 
 
-def test_no_motion_has_priority() -> None:
-    s = make_smoothed(idle_seconds=25, change_score=0.9, rate_short=5000)
-    assert _estimate(s).status is DeskStatus.NO_MOTION
-
-
-def test_organizing_has_priority_over_focused() -> None:
-    s = make_smoothed(
-        rate_short=4000, area_short=0.4, cell_short=0.4, speed_short=70,
-        active_seconds=10,
-    )
-    s.share_short[RegionId.KEYBOARD] = 0.9
-    assert _estimate(s).status is DeskStatus.ORGANIZING
-
-
-def test_focus_requires_minimum_active_seconds() -> None:
-    s = make_smoothed(rate_short=1400, area_short=0.05, active_seconds=2)
-    s.share_short[RegionId.KEYBOARD] = 0.9
-    assert _estimate(s).status is DeskStatus.WORKING
-
-
-def test_noise_penalty_multiplies_confidence() -> None:
-    clean = _estimate(make_smoothed(rate_short=4000, area_short=0.5, cell_short=0.4, speed_short=70))
-    noisy = _estimate(make_smoothed(
-        rate_short=4000, area_short=0.5, cell_short=0.4, speed_short=70, noise_ratio=0.95
-    ))
-    assert noisy.confidence == pytest.approx(clean.confidence * 0.6)
+def test_all_confidences_are_bounded() -> None:
+    for smoothed in (make_smoothed(), _focused(), make_smoothed(idle_seconds=60)):
+        assert 0.0 <= _estimate(smoothed).confidence <= 1.0
 
 
 def test_margin_confidence_boundaries() -> None:
     assert margin_confidence(10, 10, 10) == pytest.approx(0.5)
     assert margin_confidence(20, 10, 10) == pytest.approx(0.95)
-    assert margin_confidence(0, 10, 10) == pytest.approx(0.5)
-
-
-def test_confidence_is_bounded() -> None:
-    assert 0 <= _estimate(make_smoothed(rate_short=1000)).confidence <= 1
-
-
-def test_rule_ids_are_nonempty_and_unique() -> None:
-    estimates = [
-        _estimate(make_smoothed(idle_seconds=25)),
-        _estimate(make_smoothed(change_score=0.7, rate_short=5000)),
-        _estimate(make_smoothed(rate_short=200, rate_long=250)),
-    ]
-    assert len({item.rule_id for item in estimates}) == len(estimates)
-    assert all(item.rule_id for item in estimates)

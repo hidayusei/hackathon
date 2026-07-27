@@ -36,14 +36,6 @@ def test_short_ema_tracks_step_faster() -> None:
     assert abs(result.rate_short - 2000) < abs(result.rate_long - 2000)
 
 
-def test_identical_features_have_near_zero_change() -> None:
-    _, extractor, history = _parts()
-    result = None
-    for index in range(100):
-        result = history.update(extractor.extract(make_window(np.arange(100), np.arange(100), index=index)))
-    assert result.change_score < 0.05
-
-
 def test_rate_cv_is_zero_for_constant_input() -> None:
     _, extractor, history = _parts()
     for index in range(20):

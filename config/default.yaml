@@ -2,10 +2,13 @@ version: 1
 app:
   locale: ja
   autostart_pipeline: true
-  show_share_window: false
+  fullscreen: false
 sensor: {width: 320, height: 320}
 input:
-  source: dummy
+  source: auto
+  metavision:
+    delta_t_us: 20000
+    input_path: ""
   poll_timeout_ms: 50
   stall_timeout_ms: 1500
   disconnect_timeout_ms: 5000
@@ -13,7 +16,7 @@ input:
   max_open_retries: 10
   dummy:
     mode: demo
-    scenario: keyboard_steady
+    scenario: keyboard_focus
     loop: true
     seed: 20260726
     batch_interval_ms: 20
@@ -44,61 +47,43 @@ estimation:
   model_path: null
   warmup_seconds: 3.0
   idle_eps: 100.0
-  low_activity_eps: 400.0
+  away_seconds: 30.0
   focus_min_eps: 400.0
-  active_eps: 2000.0
   high_activity_eps: 5000.0
-  no_motion_seconds: 20.0
   focus_regions: [keyboard, mouse]
   focus_region_share: 0.60
   focus_min_seconds: 5.0
   focus_max_bbox_area_ratio: 0.20
   focus_max_activity_cv: 0.60
-  organizing_bbox_area_ratio: 0.25
-  organizing_active_cell_ratio: 0.25
-  organizing_centroid_speed: 35.0
-  break_max_eps: 600.0
-  break_decay_ratio: 0.40
-  transition_change_score: 0.55
-  transition_max_seconds: 6.0
-  noise_ratio_threshold: 0.79
+break:
+  enabled: true
+  after_seconds: 1500.0
+  reset_seconds: 180.0
+  snooze_seconds: 300.0
+  demo_scale: 1.0
 smoothing:
   vote_window_size: 5
   vote_min_count: 3
   enter_confidence: 0.50
   exit_confidence: 0.35
   confidence_ema_seconds: 2.0
-  display_confidence_floor: 0.45
-  min_dwell_seconds: {default: 3.0, transition: 2.0, no_motion: 5.0, unknown: 2.0}
-share:
-  enabled: true
-  min_confidence: 0.50
-  approachable_after_break_seconds: 10.0
-  recent_busy_lookback_seconds: 120.0
-  prefer_later_min_seconds: 30.0
-  update_interval_ms: 1000
-  min_hold_seconds: 5.0
+  min_dwell_seconds: {default: 3.0, away: 5.0}
 character:
-  renderer: shape
+  renderer: gif
   assets_dir: assets/character
-  loop_period_seconds: 2.0
-  transition_ms: 350
-  fps: 20
+  scale: 4
 ui:
   theme: dark
   widget:
     width: 460
     height: 250
     opacity: 0.96
-    show_confidence: true
     show_history: true
-    show_privacy_notice: true
-    character_size: 132
+    character_size: 120
     minimized_size: 96
     last_position: null
     minimized: false
-  detail: {max_preview_points: 5000, history_seconds: 300, refresh_hz: 10, character_size: 96}
-  share: {width: 480, height: 320, character_size: 96, fullscreen: false}
+  detail: {max_preview_points: 5000, history_seconds: 300, refresh_hz: 10, character_size: 120}
 privacy:
   save_raw_events: false
   save_features: false

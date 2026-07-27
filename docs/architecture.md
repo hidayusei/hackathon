@@ -1,6 +1,20 @@
 # DeskMate アーキテクチャ設計書
 
-版: 1.0 / 最終更新: 2026-07-26
+版: 2.0（Raspberry Pi 内完結・3 状態構成）/ 最終更新: 2026-07-27
+
+> ## 版 2.0 の変更点（必読）
+>
+> | # | 変更 | 影響する節 |
+> |---|------|-----------|
+> | 1 | **Raspberry Pi 5 内で完結**する。撮像・処理・UI をすべて Pi 上で動かし、PC への送信をしない | §1, §2, §7 |
+> | 2 | 入力は **Metavision SDK からのライブ受信**（`MetavisionEventSource`）。Windows では import できないので `source: auto` でダミーへ自動フォールバックする | §7 |
+> | 3 | 状態を **7 種から 3 種**へ（離席中 / 集中 / 非集中） | [status-definition.md](status-definition.md) §2 |
+> | 4 | **共有画面を廃止**。画面は常駐ウィジェットと詳細画面の 2 つ | §14 |
+> | 5 | キャラクターを **30×30 ドット絵の GIF** に変更（作成済み） | §13 |
+> | 6 | **休憩促し**（連続集中 25 分）を追加 | §11 |
+>
+> 版 1.0 の記述のうち、共有画面・話しかけやすさ・7 状態に関する部分は無効。
+> 移行対応表は [status-definition.md](status-definition.md) §11 にある。
 
 本書は実装担当（Codex）が追加判断なしに実装できる粒度で、技術構成・モジュール構成・
 クラス / 関数シグネチャ・データ形式・設定項目を定義する。
@@ -28,7 +42,21 @@ Windows で開発 / イベント処理は Python / 常駐ウィジェットが�
 | D | Python + Tauri | ○ | △ | 大（Rust ツールチェーン、学習コスト） | △ | ◎ |
 | E | Python のみの簡易 GUI（Tkinter） | △（最前面は可能だが描画性能が低い） | ×（数千点の毎秒更新に耐えない） | 小 | ○ | × |
 
-### 1.3 決定：**案 B（Python 3.11+ / PySide6 デスクトップアプリ）**
+### 1.3 決定：**案 B（Python / PySide6 デスクトップアプリ）を Raspberry Pi 5 上で実行**
+
+**版 2.0 で実行環境が変わった。** アプリは Raspberry Pi 5 の画面上で動く常駐ウィジェットになる。
+Windows は「開発と UI 確認のための環境」であり、本番実行環境ではない。
+
+| 項目 | Raspberry Pi 5（本番） | Windows（開発） |
+|------|----------------------|----------------|
+| 入力 | `MetavisionEventSource`（ライブ） | `DummyEventSource` / `FileEventSource` |
+| Metavision SDK | あり（Prophesee 公式イメージ） | **なし**（Linux 専用） |
+| Python | Raspberry Pi OS のシステム Python | 3.11–3.13 |
+| PySide6 | `pip install PySide6`（aarch64 wheel あり） | 同左 |
+| 画面 | Pi に接続したディスプレイ | 開発機のデスクトップ |
+
+**同一のコードベース・同一の設定ファイルで両方が動くこと**を要件とする。
+差分は `input.source` の解決結果だけに閉じ込める（§7.4）。
 
 理由:
 
@@ -40,9 +68,8 @@ Windows で開発 / イベント処理は Python / 常駐ウィジェットが�
 4. **入力層の差し替えに影響しない**。`EventSource` はプロセス内インターフェースなので、
    後から WebSocket 受信スレッドを追加しても UI 側の変更が発生しない。
 5. **キャラクター差し替え**は `CharacterRenderer` インターフェースで吸収する。
-   MVP は `ShapeCharacterRenderer`（絵文字 + 図形 + QPropertyAnimation）。
-   後から `ImageCharacterRenderer`（PNG / GIF / スプライト）を追加する。
-   Live2D が必要になった場合のみ `QWebEngineView` を使う派生を足す（MVP 対象外）。
+   版 2.0 の既定は `GifCharacterRenderer`（QMovie で 30×30 のドット絵 GIF を再生）。
+   素材を差し替えたい場合は同じファイル名の GIF を置くだけでよい。
 
 **この決定は確定であり、実装時に他案へ戻らないこと。**
 
@@ -91,7 +118,7 @@ Windows で開発 / イベント処理は Python / 常駐ウィジェットが�
                     │                                         │      ▼ StatusEstimate          │ │
                     │                                         │  StatusSmoother                │ │
                     │                                         │  DurationTracker               │ │
-                    │                                         │  ApproachabilityResolver       │ │
+                    │                                         │  BreakTracker                  │ │
                     │                                         │      ▼ StatusSnapshot          │ │
                     │                                         └───────────┬────────────────────┘ │
                     │                                                     │ Qt Signal (queued)   │
@@ -138,7 +165,7 @@ StatusEstimate(status, confidence, reason, rule_id)
     ▼
 (DeskStatus 確定, changed: bool)
     │  DurationTracker.update() → duration_seconds
-    │  ApproachabilityResolver.resolve() → Approachability
+    │  BreakTracker.update() → BreakState (focus_streak_seconds, break_due)
     ▼
 StatusSnapshot  ──(Qt signal: snapshot_ready)──►  UiBridge  ──►  3 ウィンドウ
     │
@@ -160,6 +187,8 @@ DeskMate/
 ├─ pyproject.toml
 ├─ requirements.txt
 ├─ .gitignore
+├─ tools/
+│   └─ make_character_gifs.py  # 版2.0: GIF 再生成（Pillow 必要、実行時は不要）
 ├─ docs/
 │   ├─ requirements.md
 │   ├─ architecture.md
@@ -171,8 +200,13 @@ DeskMate/
 │   ├─ default.yaml            # 既定設定（リポジトリ管理）
 │   └─ regions.sample.yaml     # 領域定義の記入例
 ├─ assets/
-│   └─ character/
-│       └─ README.md           # 素材の置き方（MVP では素材なし）
+│   └─ character/              # 版2.0: 作成済みの GIF が入っている
+│       ├─ running.gif         # 集中
+│       ├─ sitting.gif         # 非集中
+│       ├─ sleeping.gif        # 離席中
+│       ├─ break.gif           # 休憩促し
+│       ├─ frames/<action>/NN.png
+│       └─ README.md
 ├─ data/                       # .gitignore 済み。録画データの置き場
 │   └─ .gitkeep
 ├─ src/
@@ -197,6 +231,7 @@ DeskMate/
 │       │   ├─ dummy_source.py
 │       │   ├─ scenarios.py
 │       │   ├─ file_source.py
+│       │   ├─ metavision_source.py  # 版2.0: Pi のライブ入力
 │       │   └─ hdf5_source.py        # EXT-1: 骨組みのみ
 │       ├─ pipeline/
 │       │   ├─ __init__.py
@@ -210,7 +245,7 @@ DeskMate/
 │       │   ├─ ml_estimator.py       # EXT-6: 骨組みのみ
 │       │   ├─ smoother.py
 │       │   ├─ duration.py
-│       │   ├─ approachability.py
+│       │   ├─ break_tracker.py      # 版2.0: 休憩促し
 │       │   └─ runner.py
 │       ├─ character/
 │       │   ├─ __init__.py
@@ -225,7 +260,7 @@ DeskMate/
 │       │   ├─ status_stripe.py
 │       │   ├─ widget_window.py
 │       │   ├─ detail_window.py
-│       │   ├─ share_window.py
+│       │   ├─ break_banner.py       # 版2.0: 休憩促しバナー
 │       │   ├─ tray.py
 │       │   └─ panels/
 │       │       ├─ __init__.py
@@ -249,7 +284,7 @@ DeskMate/
     ├─ test_rule_estimator.py
     ├─ test_smoother.py
     ├─ test_duration.py
-    ├─ test_approachability.py
+    ├─ test_break_tracker.py
     ├─ test_character_mapping.py
     ├─ test_dummy_source.py
     ├─ test_file_source.py
@@ -271,7 +306,7 @@ DeskMate/
 
 | ファイル | 責務 |
 |---------|------|
-| `core/enums.py` | `DeskStatus` / `SystemStatus` / `RegionId` / `AnimationId` / `Approachability` / `SourceStatus` / `SourceKind` の定義のみ。他モジュールに依存しない |
+| `core/enums.py` | `DeskStatus`(3値) / `SystemStatus` / `RegionId` / `AnimationId`(4値) / `SourceStatus` / `SourceKind` の定義のみ。他モジュールに依存しない。**`Approachability` は版2.0 で削除** |
 | `core/types.py` | `EventBatch` / `EventWindow` / `GlobalFeatures` / `RegionFeatures` / `FeatureFrame` / `VoxelFeatures` / `SmoothedFeatures` / `StatusEstimate` / `StatusSnapshot` / `DetailFrame` / `HistoryEntry` / `PipelineStats` の dataclass 定義。すべて frozen（`DetailFrame` を除く） |
 | `core/errors.py` | 例外階層 |
 | `core/clock.py` | 単調時刻の取得と、センサ時刻（µs）↔ 経過秒の変換。テストで差し替えられるよう `Clock` プロトコルを用意 |
@@ -292,6 +327,7 @@ DeskMate/
 | `input/dummy_source.py` | シナリオ定義に従って合成イベントを生成する。デモモードとデバッグモードを持つ |
 | `input/scenarios.py` | 8 シナリオのパラメータ定義と、デモ用の時系列シーケンス |
 | `input/file_source.py` | JSONL / NPZ ファイルからイベントを読み、指定速度で再生する |
+| `input/metavision_source.py` | **版2.0**。Metavision SDK からライブ受信する。`metavision_core` は Raspberry Pi にしか無いので、import はメソッド内で遅延実行する |
 | `input/hdf5_source.py` | EXT-1。MVP では `open()` で `NotImplementedError` を投げる骨組みのみ |
 
 ### 5.4 pipeline
@@ -308,7 +344,7 @@ DeskMate/
 | `pipeline/ml_estimator.py` | EXT-6。同じ ABC を実装する骨組み。MVP では `load()` で `NotImplementedError` |
 | `pipeline/smoother.py` | 多数決・最小継続時間・ヒステリシス・遷移表 |
 | `pipeline/duration.py` | 確定状態の継続時間と、直近の確定履歴（`HistoryEntry` のリング）を管理 |
-| `pipeline/approachability.py` | 確定状態と履歴から `Approachability` を導出。特徴量を参照しない |
+| `pipeline/break_tracker.py` | **版2.0**。連続集中時間を数え、25 分で `break_due` を立てる。スヌーズとリセットを管理する |
 | `pipeline/runner.py` | 上記を束ねる `PipelineRunner`（QObject）。スレッドで動き、Qt シグナルを発火 |
 
 ### 5.5 character / ui / privacy
@@ -316,7 +352,7 @@ DeskMate/
 | ファイル | 責務 |
 |---------|------|
 | `character/mapping.py` | `DeskStatus` + 継続時間 + `SystemStatus` → `AnimationId` の決定的変換 |
-| `character/renderer.py` | `CharacterRenderer` ABC と `ShapeCharacterRenderer`（MVP）、`ImageCharacterRenderer`（骨組み） |
+| `character/renderer.py` | `CharacterRenderer` ABC と `GifCharacterRenderer`（**版2.0 の既定**。QMovie で GIF を再生し最近傍で整数倍拡大する） |
 | `ui/bridge.py` | パイプラインのシグナルを受け、UI 用に保持・再配信する。UI からの制御コマンド（停止・再開・詳細購読）をパイプラインへ送る唯一の窓口 |
 | `ui/labels.py` | 表示文字列と `resolve_label()` / `format_duration()`。文字列のハードコードはここだけ |
 | `ui/theme.py` | 色・フォント・サイズ定数 |
@@ -324,7 +360,7 @@ DeskMate/
 | `ui/status_stripe.py` | 常駐ウィジェット下部の状態履歴ストライプ。`StatusSnapshot` のみを自前で蓄積し、同じ状態が続く区間を 1 つの矩形にまとめて描く |
 | `ui/widget_window.py` | 常駐ウィジェット |
 | `ui/detail_window.py` | 本人向け詳細画面。パネルを配置し `DetailFrame` を配る |
-| `ui/share_window.py` | 共有画面。`StatusSnapshot` の抽象項目のみを描画 |
+| `ui/break_banner.py` | **版2.0**。`break_due` のときウィジェット内に出る休憩促しバナー。「あとで」「休憩する」ボタンを持つ |
 | `ui/tray.py` | システムトレイアイコンとメニュー |
 | `ui/panels/*.py` | 詳細画面の各パネル |
 | `privacy/guard.py` | 保存・送信の可否を一元管理する `PrivacyGuard`。保存系 API はここを通す |
@@ -490,7 +526,7 @@ class SmoothedFeatures:
 class StatusEstimate:
     status: DeskStatus
     confidence: float          # 0.0–1.0
-    rule_id: str               # 例 "R3_organizing"。詳細画面に表示
+    rule_id: str               # 例 "R2_focused"。詳細画面に表示
     reason: str                # 例 "rate_short=7321 >= 6000, area=0.41 >= 0.35"（日本語不要）
 
 @dataclass(frozen=True, slots=True)
@@ -509,8 +545,8 @@ class StatusSnapshot:
     animation: AnimationId
     duration_seconds: float
     confidence: float
-    approachability: Approachability
-    approachability_label: str
+    focus_streak_seconds: float  # 連続集中秒数（休憩促しの根拠）
+    break_due: bool              # 休憩を促すべきか
     changed: bool                # この更新で状態が切り替わったか
     updated_at: datetime         # ローカルタイムゾーン付き
 
@@ -628,6 +664,43 @@ class FileEventSource(EventSource):
     def supports_seek(self) -> bool: return True
     def seek(self, position_ratio: float) -> None: ...
 
+class MetavisionEventSource(EventSource):
+    """版2.0。Raspberry Pi 上の Metavision SDK からライブでイベントを受け取る。
+
+    metavision_core は Raspberry Pi にしか存在しないため、**モジュール先頭で import しない**。
+    open() の中で遅延 import し、失敗したら SourceOpenError にラップして投げる。
+
+    open():
+        from metavision_core.event_io import EventsIterator
+        self._iterator = EventsIterator(
+            input_path="",                       # 空文字 = 接続中の最初のカメラ
+            delta_t=config.delta_t_us,           # 既定 20000 (=20ms)
+            relative_timestamps=False,
+        )
+        self._stream = iter(self._iterator)
+        センサ解像度は self._iterator.get_size() -> (height, width) から取得し、
+        AppConfig.sensor と食い違う場合は WARNING を出して**イテレータ側の値を採用する**。
+
+    read(timeout_s):
+        next(self._stream) で EventCD の構造化配列を 1 個取り出し、
+        EventBatch.from_structured() へ渡す（フィールド順 x,y,p,t / p は int16）。
+        StopIteration -> SourceDisconnectedError
+        イテレータは delta_t ごとにブロックするので、timeout_s は目安としてのみ使う。
+
+    close():
+        イテレータを解放する。例外は握ってログのみ。
+
+    前提（GitHub の EVENT_CAMERA/RaspberryPi.md で確認済み）:
+        sudo dtoverlay genx320,cam0
+        ./rp5_setup_v4l.sh              # /home/eventcamera/rpi-sensor-drivers/
+        export PSEE_VAR_V4L2_BSIZE=1
+    これらは DeskMate では実行しない。起動前に済ませておく前提とし、
+    open() が失敗したときのエラーメッセージにこの手順を出す。
+    """
+
+    def __init__(self, config: MetavisionInputConfig, sensor: SensorConfig) -> None: ...
+
+
 class Hdf5EventSource(EventSource):
     """EXT-1。Metavision SDK が書き出した HDF5（/CD/events）を再生する。
     MVP では open() が NotImplementedError を投げる骨組みのみ。
@@ -651,17 +724,44 @@ SOURCE_REGISTRY: dict[SourceKind, Callable[[InputConfig, SensorConfig], EventSou
 
 ```python
 class SourceKind(str, Enum):
-    DUMMY     = "dummy"
-    FILE      = "file"
-    HDF5      = "hdf5"       # EXT-1
-    WEBSOCKET = "websocket"  # EXT-2
-    TCP       = "tcp"        # 将来
-    UDP       = "udp"        # 将来
-    HTTP      = "http"       # 将来
+    AUTO       = "auto"        # 版2.0 の既定。metavision -> dummy の順に試す
+    METAVISION = "metavision"  # 版2.0。Raspberry Pi のライブ入力
+    DUMMY      = "dummy"
+    FILE       = "file"
+    HDF5       = "hdf5"        # EXT-1
 ```
 
-未実装の `SourceKind` を指定した場合、`create_event_source` は `ConfigError` を投げ、
-アプリは起動時にダイアログを出して `dummy` にフォールバックする。
+版 1.0 の `websocket` / `tcp` / `udp` / `http` は**削除**する。Pi 内で完結するため
+ネットワーク受信の口を持たない（[privacy-design.md](privacy-design.md) PV-4）。
+
+未実装の `SourceKind` を指定した場合、`create_event_source` は `ConfigError` を投げる。
+
+### 7.4 `source: auto` の解決（Pi と Windows を同じ設定で動かす仕組み）
+
+**これが版 2.0 の要。** 同じ `config/default.yaml` で Pi でも Windows でも起動できるようにする。
+
+```python
+def resolve_source_kind(configured: SourceKind) -> tuple[SourceKind, str]:
+    """AUTO を実際に使えるソースへ解決する。
+
+    Returns: (実際に使う SourceKind, UI に出す理由の説明)
+    AUTO 以外はそのまま返す（明示指定を尊重し、勝手に差し替えない）。
+    """
+```
+
+`AUTO` の解決順序:
+
+| 順 | 試すもの | 判定方法 |
+|:--:|---------|---------|
+| 1 | `METAVISION` | `importlib.util.find_spec("metavision_core")` が None でないこと |
+| 2 | `DUMMY` | 常に成功 |
+
+- 判定に**実際の import を使わない**（`find_spec` のみ）。import は `open()` の中で遅延実行する。
+  こうしないと Windows で起動時に例外が出る。
+- 解決結果は `PipelineStats.source_name` と詳細画面に表示する。
+  例: `metavision(live)` / `dummy(demo) — metavision_core が見つかりません`。
+- **Windows で開発しているとき、自動的にダミーになる**ので、設定を書き換えずに UI を確認できる。
+- Pi 上で意図せずダミーになっていないか判別できるよう、ウィジェットのツールチップにも入力ソース名を出す。
 
 ### 7.3 実機データを Windows で読むための経路（重要）
 
@@ -924,12 +1024,9 @@ class RuleStatusEstimator(StatusEstimator):
     def estimate(self, frame: FeatureFrame, smoothed: SmoothedFeatures) -> StatusEstimate: ...
 
     # 各ルール: 条件を満たせば StatusEstimate、満たさなければ None
-    def _rule_no_motion(self, s: SmoothedFeatures) -> StatusEstimate | None: ...
-    def _rule_transition(self, s: SmoothedFeatures) -> StatusEstimate | None: ...
-    def _rule_organizing(self, s: SmoothedFeatures) -> StatusEstimate | None: ...
+    def _rule_away(self, s: SmoothedFeatures) -> StatusEstimate | None: ...
     def _rule_focused(self, s: SmoothedFeatures) -> StatusEstimate | None: ...
-    def _rule_short_break(self, s: SmoothedFeatures) -> StatusEstimate | None: ...
-    def _rule_working(self, s: SmoothedFeatures) -> StatusEstimate | None: ...
+    # idle は必ず成立するフォールバックなので、判定メソッドを持たない
 
     def _focus_share(self, s: SmoothedFeatures) -> float: ...
     def _apply_noise_penalty(self, estimate: StatusEstimate,
@@ -957,7 +1054,7 @@ FEATURE_NAMES: tuple[str, ...]   # 特徴ベクトルの列名。順序を変え
 
 ---
 
-## 11. 平滑化・継続時間・話しかけやすさ
+## 11. 平滑化・継続時間・休憩促し
 
 ```python
 # pipeline/smoother.py
@@ -975,9 +1072,9 @@ class StatusSmoother:
     def __init__(self, config: SmoothingConfig, clock: Clock) -> None: ...
 
     def update(self, estimate: StatusEstimate, now: float,
-               force_no_motion: bool = False) -> SmoothingResult:
+               force_away: bool = False) -> SmoothingResult:
         """now は time.monotonic() の値。
-        force_no_motion=True のとき §6.2-7 の即時遷移を行う。"""
+        force_away=True のとき [status-definition.md] §7.2-5 の即時遷移を行う。"""
 
     def reset(self, status: DeskStatus = DeskStatus.UNKNOWN) -> None: ...
 
@@ -1004,21 +1101,38 @@ class DurationTracker:
     def history(self) -> list[HistoryEntry]:
         """新しい順ではなく、古い順（started_monotonic 昇順）で返す。"""
     def recent(self, seconds: float, now: float) -> list[HistoryEntry]: ...
-    def had_status_within(self, statuses: set[DeskStatus], seconds: float,
-                          now: float, exclude_current: bool = True) -> bool:
-        """Approachability ルール 5 で使う。"""
     def reset(self) -> None: ...
 ```
 
 ```python
-# pipeline/approachability.py
-class ApproachabilityResolver:
-    """[status-definition.md] §8。特徴量には一切触れない。"""
-    def __init__(self, config: ShareConfig, clock: Clock) -> None: ...
-    def resolve(self, status: DeskStatus, system_status: SystemStatus,
-                duration_seconds: float, confidence: float,
-                tracker: DurationTracker, now: float) -> Approachability: ...
+# pipeline/break_tracker.py
+@dataclass(frozen=True, slots=True)
+class BreakState:
+    """Break-prompt state. Independent of DeskStatus."""
+    focus_streak_seconds: float
+    break_due: bool
+    snoozed_until: float | None
+
+
+class BreakTracker:
+    """[status-definition.md] §3 の休憩促しを実装する。特徴量には触れない。"""
+
+    def __init__(self, config: BreakConfig, clock: Clock) -> None: ...
+
+    def update(self, status: DeskStatus, system_status: SystemStatus,
+               window_seconds: float, now: float) -> BreakState:
+        """1 窓ごとに呼ぶ。連続集中を数え、25 分で break_due を立てる。"""
+
+    def snooze(self, now: float) -> None:
+        """「あとで」。snooze_seconds 後に再提示する。"""
+
+    def acknowledge(self, now: float) -> None:
+        """「休憩する」。連続集中を 0 に戻す。"""
+
     def reset(self) -> None: ...
+
+    @property
+    def state(self) -> BreakState: ...
 ```
 
 ---
@@ -1096,7 +1210,7 @@ class PipelineRunner(QObject):
 
 - `EventSource.read(timeout_s=config.input.poll_timeout_ms/1000)` でブロックする。
 - `None` が返り続けて `input.stall_timeout_ms`（既定 1500）を超えたら `SourceStatus.STALLED` を発火し、
-  `EventWindower.flush_idle()` で空窓を刻み続ける（＝ `no_motion` に向かう）。
+  `EventWindower.flush_idle()` で空窓を刻み続ける（＝ `away` に向かう）。
 - `input.disconnect_timeout_ms`（既定 5000）を超えたら `SystemStatus.NO_SIGNAL`。
   以後 `input.reconnect_interval_ms`（既定 3000）ごとに `reset()` → `open()` を試みる。
 
@@ -1117,7 +1231,8 @@ class UiBridge(QObject):
 
     # UI からの操作（内部で invokeMethod による Queued 呼び出しに変換する）
     def set_paused(self, paused: bool) -> None: ...
-    def set_sharing_enabled(self, enabled: bool) -> None: ...
+    def snooze_break(self) -> None: ...        # 版2.0
+    def acknowledge_break(self) -> None: ...   # 版2.0
     def open_detail(self) -> None: ...      # detail 購読 ON
     def close_detail(self) -> None: ...     # detail 購読 OFF
     def set_scenario(self, scenario_id: str) -> None: ...
@@ -1125,70 +1240,75 @@ class UiBridge(QObject):
 
     @property
     def last_snapshot(self) -> StatusSnapshot | None: ...
-    @property
-    def sharing_enabled(self) -> bool: ...
 ```
 
-`set_sharing_enabled(False)` のとき、`UiBridge` は共有画面向けに
-`system_status=SHARING_OFF` へ差し替えた `StatusSnapshot` を配る（元の状態を漏らさない）。
+版 2.0 では共有画面が無いため `set_sharing_enabled()` / `sharing_enabled` は削除する。
 
 ---
 
 ## 13. キャラクター表示
 
+**版 2.0 でドット絵 GIF に変更した。** 素材は作成済みで `assets/character/` にある。
+
 ```python
 # character/mapping.py
-@dataclass(frozen=True, slots=True)
-class AnimationRule:
-    status: DeskStatus
-    min_duration_s: float
-    animation: AnimationId
-
-ANIMATION_RULES: tuple[AnimationRule, ...]        # status-definition.md §7.2 の表
-SYSTEM_ANIMATION: dict[SystemStatus, AnimationId] # 同 §7.2 下段
-
-def resolve_animation(status: DeskStatus, duration_seconds: float,
+def resolve_animation(status: DeskStatus, break_due: bool,
                       system_status: SystemStatus = SystemStatus.RUNNING) -> AnimationId:
-    """system_status が RUNNING/SHARING_OFF 以外なら SYSTEM_ANIMATION を優先。
-    それ以外は ANIMATION_RULES のうち status が一致し min_duration_s <= duration の中で
-    min_duration_s が最大のものを選ぶ。該当なしは AnimationId.UNKNOWN。"""
+    """[status-definition.md] §4.2 の 5 段の順序で判定する。
+
+    1. system_status != RUNNING          -> SITTING
+    2. break_due                         -> BREAK
+    3. status == AWAY                    -> SLEEPING
+    4. status == FOCUSED                 -> RUNNING
+    5. status == IDLE                    -> SITTING
+
+    版 1.0 の ANIMATION_RULES / SYSTEM_ANIMATION / 継続時間による分岐は廃止。
+    """
 ```
 
 ```python
 # character/renderer.py
 class CharacterRenderer(abc.ABC):
-    """キャラクター描画の差し替え口。QWidget を返すのではなく、
-    与えられた QPainter に描く形にして、ウィジェット側の構造に依存しない。"""
+    """キャラクター描画の差し替え口。"""
 
     @abc.abstractmethod
-    def set_animation(self, animation: AnimationId, changed: bool) -> None: ...
+    def set_animation(self, animation: AnimationId) -> None:
+        """表示するアニメーションを切り替える。同じ値なら何もしない
+        （GIF の再生位置をリセットしないため）。"""
 
     @abc.abstractmethod
-    def advance(self, dt_seconds: float) -> None:
-        """アニメーション位相を進める。UI の 20 fps タイマから呼ばれる。"""
+    def widget(self) -> QWidget:
+        """描画ウィジェットを返す。"""
 
-    @abc.abstractmethod
-    def paint(self, painter: QPainter, rect: QRect) -> None: ...
 
-    @property
-    @abc.abstractmethod
-    def available_animations(self) -> frozenset[AnimationId]: ...
+class GifCharacterRenderer(CharacterRenderer):
+    """版 2.0 の既定実装。QMovie で 30x30 の GIF を再生する。
+
+    - `assets/character/<animation_id>.gif` を起動時にすべて QMovie として読み込み、
+      切り替え時は再生対象を差し替えるだけにする（毎回ロードしない）
+    - **拡大は最近傍補間・整数倍のみ**。
+      `movie.setScaledSize(QSize(30 * scale, 30 * scale))` ではなく、
+      各フレームを `QPixmap.scaled(..., Qt.TransformationMode.FastTransformation)` で
+      拡大してから QLabel に渡す（QMovie の既定は滑らかな補間になりうるため）
+    - `scale` は `character.scale`（既定 4 -> 120px）
+    - 素材が欠けている AnimationId があれば ConfigError を投げる（黙って落とさない）
+    - 背景は透過のまま扱う
+
+    Raises: ConfigError（assets_dir に必要な 4 つの GIF が揃っていない）
+    """
+    def __init__(self, config: CharacterConfig) -> None: ...
+
 
 class ShapeCharacterRenderer(CharacterRenderer):
-    """MVP 実装。素材を必要としない。
-    - 円形の胴体（テーマ色）+ 状態を表す絵文字 + アニメーション別の動き
-    - 動きの定義は MOTION_TABLE に集約（上下動 / 左右首振り / 回転 / 拡縮 / 静止）
-    - 素材がない場合の代替表示要件 FR-UI-4 を満たす"""
-    def __init__(self, theme: Theme, config: CharacterConfig) -> None: ...
+    """素材が無い環境のための保険。単色の円と状態名の頭文字だけを描く。
+    既定では使わない（`character.renderer: gif`）。"""
 
-class ImageCharacterRenderer(CharacterRenderer):
-    """EXT-7。assets/character/<animation_id>.(gif|png) を読み込む。
-    ファイルが無い AnimationId は ShapeCharacterRenderer にフォールバックする。
-    MVP では骨組みのみ（__init__ で assets を走査し、空なら use_fallback=True）。"""
 
-def create_renderer(config: CharacterConfig, theme: Theme) -> CharacterRenderer:
-    """config.renderer ('shape' | 'image') で選ぶ。既定 'shape'。"""
+def create_renderer(config: CharacterConfig) -> CharacterRenderer:
+    """config.character.renderer ('gif' | 'shape') で選ぶ。既定 'gif'。"""
 ```
+
+**版 1.0 の `ImageCharacterRenderer` は削除する。** `GifCharacterRenderer` が置き換える。
 
 ```python
 # ui/character_view.py
@@ -1301,30 +1421,35 @@ class WidgetWindow(QWidget):
 - 状態固定ボタン（7 状態 + 解除）
 - 「特徴量を CSV に保存」ボタン（`PrivacyGuard` の許可が必要）
 
-### 14.3 共有画面 `ui/share_window.py`
+### 14.3 休憩促しバナー `ui/break_banner.py`
 
-`QWidget`（別ウィンドウ、既定 480×320、フルスクリーン切替可）。
+**版 2.0 で共有画面を廃止し、代わりにこのバナーを追加する。**
+共有機能は将来の展望として設計から外す（[requirements.md](requirements.md) §10 EXT-1）。
 
-表示するもの（これ以外を追加してはならない）:
+`break_due` が `True` の間だけ、常駐ウィジェットの本体部分に重ねて表示する小さなバナー。
+
+```
+┌────────────────────────────────────┐
+│ そろそろ休憩しませんか               │
+│ 25分12秒 集中しています              │
+│              [あとで]  [休憩する]    │
+└────────────────────────────────────┘
+```
 
 | 要素 | 内容 |
 |------|------|
-| キャラクター | `CharacterView`（96px） |
-| 抽象状態 | `STATUS_LABELS_JA` を `resolve_label()` 経由で |
-| 継続時間 | `format_duration()` |
-| 話しかけやすさ | `APPROACHABILITY_LABELS_JA` + 色 |
-| 最終更新時刻 | `HH:MM` 形式。`snapshot.updated_at` から |
+| 見出し | `BREAK_TITLE_JA`「そろそろ休憩しませんか」 |
+| 本文 | `BREAK_BODY_JA` に `format_duration(focus_streak_seconds)` を埋める |
+| あとでボタン | `bridge.snooze_break()` → 5 分後に再提示 |
+| 休憩するボタン | `bridge.acknowledge_break()` → 連続集中をリセット |
+| 配色 | `#E8A33D`（橙）の枠。背景は `theme.surface_alt` |
 
-**表示してはならないもの**: 点群、特徴量、生イベント、机上の位置情報、
-操作対象（キーボード / マウスなど領域名）、イベント数、信頼度の数値。
-
-実装上の担保: `ShareWindow` は `DetailFrame` のシグナルに**接続しない**。
-`StatusSnapshot` のフィールドのみを参照する。`tests/test_ui_smoke.py` でこれを検証する。
+同時にキャラクターが `break.gif` に切り替わる（[status-definition.md](status-definition.md) §4.2）。
+**音やポップアップウィンドウは出さない。** 作業の邪魔をしないこと。
 
 ### 14.4 トレイ `ui/tray.py`
 
-`QSystemTrayIcon`。メニュー: ウィジェット表示 / 詳細画面 / 共有画面 / 推定停止・再開 /
-共有停止・再開 / 終了。
+`QSystemTrayIcon`。メニュー: ウィジェット表示 / 詳細画面 / 推定停止・再開 / 終了。
 
 アイコンは `build_status_icon(status)` で**実行時に生成**する（バイナリ素材を持たない）。
 現在状態の `STATUS_COLORS` で塗った円を描き、`snapshot_updated` ごとに更新する。
@@ -1346,14 +1471,18 @@ version: 1
 app:
   locale: ja
   autostart_pipeline: true      # 起動時に推定を開始するか
-  show_share_window: false      # 起動時に共有画面を開くか
+  fullscreen: false             # Pi の画面いっぱいに出すか
 
 sensor:
   width: 320                    # Prophesee GenX320
   height: 320
 
 input:
-  source: dummy                 # dummy | file | hdf5 | websocket | tcp | udp | http
+  source: auto                  # auto | metavision | dummy | file | hdf5
+                                # auto = Pi なら metavision、無ければ dummy
+  metavision:
+    delta_t_us: 20000           # 1 バッチが表す時間 (20ms)
+    input_path: ""              # "" = 接続中の最初のカメラ
   poll_timeout_ms: 50
   stall_timeout_ms: 1500
   disconnect_timeout_ms: 5000
@@ -1409,24 +1538,21 @@ estimation:
   model_path: null
   warmup_seconds: 3.0
   idle_eps: 100.0
-  low_activity_eps: 400.0
+  away_seconds: 30.0
   focus_min_eps: 400.0
-  active_eps: 2000.0
   high_activity_eps: 5000.0
-  no_motion_seconds: 20.0
   focus_regions: [keyboard, mouse]
   focus_region_share: 0.60
   focus_min_seconds: 5.0
   focus_max_bbox_area_ratio: 0.20
   focus_max_activity_cv: 0.60
-  organizing_bbox_area_ratio: 0.25
-  organizing_active_cell_ratio: 0.25
-  organizing_centroid_speed: 35.0
-  break_max_eps: 600.0
-  break_decay_ratio: 0.40
-  transition_change_score: 0.55
-  transition_max_seconds: 6.0
-  noise_ratio_threshold: 0.79
+
+break:
+  enabled: true
+  after_seconds: 1500.0         # 連続集中 25 分
+  reset_seconds: 180.0          # 非集中が 3 分続いたらリセット
+  snooze_seconds: 300.0         # 「あとで」で 5 分後に再提示
+  demo_scale: 1.0               # デモでは 0.02 (25分 -> 30秒)
 
 smoothing:
   vote_window_size: 5
@@ -1434,28 +1560,14 @@ smoothing:
   enter_confidence: 0.50
   exit_confidence: 0.35
   confidence_ema_seconds: 2.0
-  display_confidence_floor: 0.45   # これ未満は「状態不明」表示に降格
   min_dwell_seconds:
     default: 3.0
-    transition: 2.0
-    no_motion: 5.0
-    unknown: 2.0
-
-share:
-  enabled: true
-  min_confidence: 0.50
-  approachable_after_break_seconds: 10.0
-  recent_busy_lookback_seconds: 120.0
-  prefer_later_min_seconds: 30.0
-  update_interval_ms: 1000
-  min_hold_seconds: 5.0
+    away: 5.0
 
 character:
-  renderer: shape               # shape | image
+  renderer: gif                 # gif | shape（shape は素材が無いときの保険）
   assets_dir: assets/character
-  loop_period_seconds: 2.0
-  transition_ms: 350
-  fps: 20
+  scale: 4                      # 30px の整数倍のみ (4 -> 120px)
 
 ui:
   theme: dark                   # dark | light
@@ -1475,11 +1587,6 @@ ui:
     history_seconds: 300
     refresh_hz: 10
     character_size: 96
-  share:
-    width: 480
-    height: 320
-    character_size: 96
-    fullscreen: false
 
 privacy:
   save_raw_events: false        # 常に false 起動。true にしても実行時に警告を出す
@@ -1618,10 +1725,10 @@ class PrivacyViolationError(DeskMateError):
 1. `read()` が `None` を返し続ける。
 2. `stall_timeout_ms`（1500 ms）経過 → `SourceStatus.STALLED` を発火。
    `EventWindower.flush_idle()` で空窓を生成し続ける。特徴量は 0、`idle_seconds` が伸びる。
-   → 通常の推定に従い、20 秒後に `no_motion` になる。
+   → 通常の推定に従い、`away_seconds`（30 秒）後に `away` になる。
 3. `disconnect_timeout_ms`（5000 ms）経過 → `SystemStatus.NO_SIGNAL`。
    **ここで空窓の生成を止める**（データが無いのに「動きがない」と主張しないため）。
-   状態は `unknown` に落とし、UI は「入力が途切れています」を表示。共有画面は「現在の状態を判定できません」。
+   UI は「入力が途切れています」を表示する（`SystemStatus.NO_SIGNAL`）。
 4. `reconnect_interval_ms`（3000 ms）ごとに `source.reset()` → `source.open()`。
 5. 復帰したら `windower.reset()` / `extractor.reset()` / `history.reset()` / `smoother.reset()` を行い、
    `SystemStatus.STARTING` から再度ウォームアップする。
@@ -1787,7 +1894,7 @@ Pi 側に要求する仕様（本 MVP の対象外だが、インターフェー
 
 | 種別 | 対象 | 方針 |
 |------|------|------|
-| 単体 | `windower` / `features` / `regions` / `history` / `rule_estimator` / `smoother` / `duration` / `approachability` / `character.mapping` / `labels` / `config` | 合成イベント列を与え、期待値を厳密比較（float は `pytest.approx`） |
+| 単体 | `windower` / `features` / `regions` / `history` / `rule_estimator` / `smoother` / `duration` / `break_tracker` / `character.mapping` / `labels` / `config` | 合成イベント列を与え、期待値を厳密比較（float は `pytest.approx`） |
 | 単体 | `dummy_source` / `file_source` | seed 固定で再現性を確認。統計量（平均 eps、領域偏り）が仕様どおりか |
 | 結合 | `runner` | ダミーソース → 各シナリオを流し、期待する `DeskStatus` に到達することを確認（実時間ではなく `FakeClock` と手動 tick で駆動） |
 | 異常系 | `source_failure` | `read()` が `None` / 例外を返すソースを注入し、`NO_SIGNAL` → 復帰を確認 |
@@ -1804,14 +1911,14 @@ GUI テストは `QT_QPA_PLATFORM=offscreen` で実行する。
 | # | リスク | 影響 | 対策 |
 |---|-------|------|------|
 | R1 | **実 GenX320 の活動量スケールが、想定（数百〜数千 eps）と大きく違う。これは現時点で未検証の最大リスク** | 全閾値が無意味になり、`working` か `unknown` に貼り付く | 閾値をすべて設定ファイル化済み。実データ入手後に `estimation.*` のみ調整すれば足りる。`activity` 系は eps という物理量で定義してあり、キャリブレーション用に詳細画面へ実測 eps を常時表示する。§24 の手順で実測してから調整する |
-| R2 | 照明のちらつき・モニタのリフレッシュがノイズとして大量に乗る | 常に `working` / `organizing` になる | `noise_ratio` 特徴量と信頼度ペナルティを用意。EXT として「常時発火する画素のマスク」を追加できるよう `RegionMap` に除外矩形の余地を残す（MVP では未実装） |
+| R2 | 照明のちらつき・モニタのリフレッシュがノイズとして大量に乗る | 常に `idle`（非集中）になり、`focused` が出なくなる | ノイズは空間的に散るため `focus_share` が下がり、安全側の `idle` に落ちる。EXT として「常時発火する画素のマスク」を追加できるよう `RegionMap` に除外矩形の余地を残す（MVP では未実装） |
 | R3 | 領域矩形の設定が実機と合わない | `focused` が出ない | 詳細画面に領域矩形を点群へ重ね描きし、目視で調整できるようにする。EXT-3 で GUI エディタ |
 | R4 | pyqtgraph の点群描画が UI をブロックする | 詳細画面でカクつく | 描画は最大 5,000 点に間引き、更新は 10 Hz に制限。詳細画面を閉じている間は `DetailFrame` 自体を作らない |
 | R5 | 平滑化が強すぎて、デモ中に状態が変わらない | デモが成立しない | `min_dwell_seconds` を設定化。デモ用シナリオの各ステップは最小継続時間の 5 倍以上の長さにする（[demo-scenario.md](demo-scenario.md) §3） |
 | R6 | PySide6 の枠なし最前面ウィンドウが、特定の Windows 環境で他の全画面アプリに隠れる | 常駐表示が見えない | トレイアイコンから再表示できるようにする。`WindowStaysOnTopHint` の再適用ボタンを右クリックメニューに置く |
 | R7 | センサ時刻 `t` の巻き戻り・飛び | 窓化が壊れる | `EventWindower.push()` で検出し `PipelineError` → reset。飛びは `flush_idle` 相当の空窓で埋める |
 | R8 | 状態が `unknown` ばかりになる（閾値が実データに対して厳しい） | デモの説得力が落ちる | `working` を最後の砦にして広めに取る。詳細画面に「どのルールで落ちたか」（最後に評価したルール ID）を表示して調整を容易にする |
-| R9 | ハッカソン期間内に UI 3 画面が終わらない | MVP 未達 | 実装順序（[implementation-plan.md](implementation-plan.md) §3）で共有画面を最小構成にし、常駐ウィジェット → 共有画面 → 詳細画面の順で作る |
+| R9 | Raspberry Pi 5 の描画性能が足りず、ウィジェットがカクつく | デモの見栄えが落ちる | GIF は 30×30 の整数倍拡大なので描画負荷はごく小さい。詳細画面の点群描画だけが重いので、既定で閉じておき `ui.detail.refresh_hz` を Pi では 5 に下げられるようにする |
 | R10 | `focused` と `working` の境界が実データで曖昧 | 表示が頻繁に揺れる | 遷移表で `focused ↔ working` の相互遷移は許可しつつ、`min_dwell` と多数決で抑える。それでも揺れる場合は `focus_min_seconds` を伸ばす |
 
 ---
@@ -1826,8 +1933,8 @@ GUI テストは `QT_QPA_PLATFORM=offscreen` で実行する。
 | Q3b | 実機 HDF5 を Windows 側で直接読むか、変換経由にするか → **変換経由に決定** | §7.3 のとおり。ECF コーデックと Linux 専用 SDK のため、WSL2 側で `.npz` へ変換する | 完了 |
 | Q4 | 机上領域の既定矩形が実際の設置と合うか | [status-definition.md](status-definition.md) §3 の既定値 | 実機設置後に `config.yaml` で調整 |
 | Q5 | 閾値の実測キャリブレーション手順 | 手動調整（詳細画面の実測 eps を見て設定を書き換え） | 実データ取得後。EXT で自動キャリブレーションを検討 |
-| Q6 | キャラクターのデザイン・素材形式（GIF / スプライトシート / Live2D） | `ShapeCharacterRenderer` で代替。`ImageCharacterRenderer` の口だけ用意 | 素材制作者と調整（EXT-7） |
-| Q7 | 共有画面を別デバイス（スマホ等）に出すか | MVP では同一 PC 上の別ウィンドウのみ | EXT-8。実施する場合もローカルネットワーク限定とし、外部送信禁止の原則を再確認する |
+| Q6 | ~~キャラクターのデザイン・素材形式~~ → **解決**。30×30 ドット絵ティラノサウルスの GIF 4 種を作成済み | `assets/character/` に配置済み。`tools/make_character_gifs.py` で再生成できる | 完了 |
+| Q7 | 状態を周囲に共有する手段（旧・共有画面） | **版2.0 では実装しない。将来の展望として保留** | 再開時はローカルネットワーク限定とし、[status-definition.md](status-definition.md) §9 の JSON 形式のみを出す |
 | Q8 | 状態履歴を永続化するか（セッションをまたぐか） | MVP はメモリ上のみ。終了で消える | EXT-4。保存するなら抽象状態のみ・保持期間設定必須 |
 | Q9 | Random Forest の教師データ収集方法 | ルールベースの出力を弱教師として使う想定 | EXT-6 着手時 |
 | Q10 | 複数人・複数机への対応 | 対象外（1 台 1 人） | 未定 |
@@ -1868,18 +1975,16 @@ DeskMate は両者に**コードレベルでは依存しない**（数式と運�
 
 閾値（R1）を確定させるための手順。
 
-1. WSL2 または Pi 上で、机上の代表的な 5 場面を各 30 秒ずつ収録する
-   （タイピング / マウス操作 / 机上を片付ける / 座って静止 / 無人）。
+1. Pi 上で、机上の代表的な 4 場面を各 30 秒ずつ収録する
+   （タイピング / マウス操作 / 座って静止 / 無人）。
 2. `tools/convert_events.py` で `.npz` へ変換し、Windows へコピーする。
 3. `python -m deskmate --source file --file <path> --debug` で再生し、
    詳細画面の実測 `event_rate_eps` を場面ごとに記録する。
 4. 記録値から次のように閾値を決める。
    - `idle_eps` ← 「座って静止」の中央値 × 1.5
-   - `low_activity_eps` / `focus_min_eps` ← 「タイピング」の 10 パーセンタイル × 0.8
-   - `active_eps` ← 「片付ける」の中央値 × 0.7
+   - `away_seconds` ← 実際に離席してから表示が変わるまでの体感で調整（既定 30 秒）
+   - `focus_min_eps` ← 「タイピング」の 10 パーセンタイル × 0.8
    - `high_activity_eps` ← 「片付ける」の 90 パーセンタイル
-   - `break_max_eps` ← `low_activity_eps` × 1.5
-   - `organizing_centroid_speed` ← 「片付ける」の `centroid_speed` の中央値 × 0.7
 5. [status-definition.md](status-definition.md) §5.2 と `config/default.yaml` の**両方**を更新する。
 
 ---
@@ -1893,3 +1998,81 @@ DeskMate は両者に**コードレベルでは依存しない**（数式と運�
 **MVP では採用しない。** 理由: 5 ms ビンの時系列を保持するとメモリと計算量が増え、
 現在の 200 ms 窓ベースの設計に対して構造変更が必要になるため。
 ルールベースが実データで期待どおり動かなかった場合の改善案として記録しておく。
+
+---
+
+## 26. Raspberry Pi での実行
+
+### 26.1 前提（DeskMate の外で済ませておくこと）
+
+GitHub の `EVENT_CAMERA/RaspberryPi.md` で確認した手順。**DeskMate はこれらを実行しない。**
+
+```bash
+sudo dtoverlay genx320,cam0            # GenX320 のドライバオーバーレイ
+cd ~/rpi-sensor-drivers
+./rp5_setup_v4l.sh                     # V4L2 の設定
+export PSEE_VAR_V4L2_BSIZE=1           # Metavision のバッファ設定
+metavision_viewer                      # ライブ映像が出れば準備完了
+```
+
+`metavision_viewer` で映像が出ることを確認してから DeskMate を起動する。
+`MetavisionEventSource.open()` が失敗したときは、このエラーメッセージにこの手順を出す。
+
+### 26.2 DeskMate の導入
+
+```bash
+git clone <このリポジトリ> ~/DeskMate
+cd ~/DeskMate
+python3 -m venv --system-site-packages .venv    # metavision_core を見せるため必須
+.venv/bin/pip install -e ".[dev]"
+```
+
+**`--system-site-packages` が必要。** Metavision SDK は apt でシステム側に入るので、
+これを付けないと仮想環境から `metavision_core` が見えない。
+
+### 26.3 起動
+
+```bash
+.venv/bin/python -m deskmate                    # input.source: auto -> metavision
+.venv/bin/python -m deskmate --fullscreen       # Pi の画面いっぱいに出す
+.venv/bin/python -m deskmate --source dummy     # カメラ無しで UI だけ確認
+```
+
+### 26.4 Windows 開発環境との違い
+
+| 項目 | Raspberry Pi 5 | Windows |
+|------|---------------|---------|
+| `input.source: auto` の解決先 | `metavision`（ライブ） | `dummy`（自動フォールバック） |
+| `.raw` の再生 | Metavision SDK で可能 | 不可。Pi 側で `.npz` へ変換して持ち込む（§7.3） |
+| 詳細画面の更新頻度 | `ui.detail.refresh_hz` を 5 に下げることを推奨 | 10 のままでよい |
+| 確認できること | 全機能 | UI・状態遷移・休憩促し（ダミー入力で） |
+
+**Windows でできない確認**（実機でのみ可能）:
+
+- 実カメラのイベントレートが `estimation` の閾値と合っているか（§24.3 のキャリブレーション）
+- 机上の領域矩形が実際の設置と合っているか
+- Pi の画面サイズでウィジェットが適切に見えるか
+- 連続稼働時の発熱・性能
+
+### 26.5 自動起動（任意）
+
+デモ時に電源投入だけで立ち上げたい場合は systemd のユーザーユニットにする。
+
+```ini
+# ~/.config/systemd/user/deskmate.service
+[Unit]
+Description=DeskMate
+After=graphical-session.target
+
+[Service]
+Environment=PSEE_VAR_V4L2_BSIZE=1
+WorkingDirectory=%h/DeskMate
+ExecStart=%h/DeskMate/.venv/bin/python -m deskmate
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
+```
+
+`systemctl --user enable --now deskmate` で有効化する。
+**MVP では必須ではない。** 手動起動で足りる。

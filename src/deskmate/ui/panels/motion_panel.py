@@ -37,5 +37,5 @@ class MotionPanel(QWidget):
         self.values.setText(
             f"bbox {g.bbox_width:.1f} × {g.bbox_height:.1f} px / "
             f"area {g.bbox_area_ratio:.3f} / speed {g.centroid_speed:.1f} px/s / "
-            f"delta {g.event_rate_delta:.1f} eps / change {detail.smoothed.change_score:.3f}"
+            f"delta {g.event_rate_delta:.1f} eps"
         )
