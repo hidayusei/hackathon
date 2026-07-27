@@ -72,7 +72,6 @@ def make_smoothed(**overrides: float) -> SmoothedFeatures:
         "speed_short": 0.0,
         "cell_short": 0.0,
         "rate_cv_10s": 0.0,
-        "change_score": 0.0,
         "idle_seconds": 0.0,
         "active_seconds": 0.0,
         "activity_ratio_10s": 0.0,

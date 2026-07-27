@@ -18,7 +18,7 @@ from deskmate.ui.bridge import UiBridge
 from deskmate.ui.detail_window import DetailWindow
 
 
-def _manual_runner(scenario: str = "keyboard_steady", clock: FakeClock | None = None):
+def _manual_runner(scenario: str = "keyboard_focus", clock: FakeClock | None = None):
     clock = clock or FakeClock()
     config = load_config()
     runner = PipelineRunner(config, clock)
@@ -157,7 +157,7 @@ def test_resume_restarts_warmup() -> None:
     runner.set_paused(True)
     runner.set_paused(False)
     assert runner._system_status is SystemStatus.STARTING
-    assert runner.smoother.current is DeskStatus.UNKNOWN
+    assert runner.smoother.current is DeskStatus.IDLE
     assert runner.windower.window_index == 0
 
 

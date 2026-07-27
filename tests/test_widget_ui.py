@@ -1,184 +1,187 @@
-"""Resident widget presentation tests."""
+"""Main-window presentation tests."""
 
 from datetime import datetime
 
 from conftest import FakeClock
-from deskmate.character.renderer import _GLYPHS, _MOTION, ShapeCharacterRenderer
 from deskmate.config.loader import load_config
-from deskmate.core.enums import AnimationId, Approachability, DeskStatus, SystemStatus
+from deskmate.core.enums import AnimationId, DeskStatus, SourceStatus, SystemStatus
 from deskmate.core.types import StatusSnapshot
 from deskmate.pipeline.runner import PipelineRunner
 from deskmate.ui.bridge import UiBridge
-from deskmate.ui.status_stripe import StatusStripe
-from deskmate.ui.theme import STATUS_COLORS, animation_color, resolve_theme, status_color
+from deskmate.ui.theme import STATUS_COLORS, animation_color, status_color
 from deskmate.ui.widget_window import WidgetWindow
 
 
-def _snapshot(status, duration=10.0, confidence=0.8,
-              system=SystemStatus.RUNNING, changed=False):
+def _snapshot(
+    status: DeskStatus,
+    duration: float = 10.0,
+    system: SystemStatus = SystemStatus.RUNNING,
+    break_due: bool = False,
+):
+    animation = AnimationId.BREAK if break_due else {
+        DeskStatus.FOCUSED: AnimationId.RUNNING,
+        DeskStatus.IDLE: AnimationId.SITTING,
+        DeskStatus.AWAY: AnimationId.SLEEPING,
+    }[status]
     return StatusSnapshot(
-        status, system, status.value, AnimationId.UNKNOWN, duration, confidence,
-        Approachability.UNDETERMINED, "", changed, datetime.now().astimezone(),
+        status,
+        system,
+        status.value,
+        animation,
+        duration,
+        0.8,
+        duration,
+        break_due,
+        False,
+        datetime.now().astimezone(),
     )
 
 
 def _widget():
-    config = load_config()
+    config = load_config({"input": {"source": "dummy"}})
     bridge = UiBridge(PipelineRunner(config, FakeClock()), config)
     return config, WidgetWindow(bridge, config)
 
 
-# ------------------------------------------------------------------ sizing
 def test_widget_uses_configured_size(qt_app) -> None:
     config, widget = _widget()
-    assert widget.width() == config.ui.widget.width
-    assert widget.height() == config.ui.widget.height
-    widget.deleteLater()
+    assert widget.size().width() == config.ui.widget.width
+    assert widget.size().height() == config.ui.widget.height
 
 
-def test_widget_default_size_is_readable_at_a_glance(qt_app) -> None:
-    """The resident widget must stay large enough for its four text rows."""
-    config = load_config()
-    assert config.ui.widget.width >= 400
-    assert config.ui.widget.height >= 220
-    assert config.ui.widget.character_size >= 120
-
-
-def test_minimized_mode_shrinks_to_the_configured_square(qt_app) -> None:
+def test_minimized_mode_shrinks_to_square(qt_app) -> None:
     config, widget = _widget()
+    before = widget.character_view.size()
     widget.toggle_minimized()
-    assert widget.width() == config.ui.widget.minimized_size
-    assert widget.height() == config.ui.widget.minimized_size
+    character_size = 30 * config.character.scale
+    assert widget.character_view.size() == before
+    assert widget.character_view.width() == character_size
+    assert widget.character_view.height() == character_size
+    assert widget.width() == character_size + 12
+    assert widget.height() == character_size + 12
     assert widget.status_label.isHidden()
-    widget.toggle_minimized()
-    assert widget.width() == config.ui.widget.width
-    assert not widget.status_label.isHidden()
-    widget.deleteLater()
 
 
-# ------------------------------------------------------------------ content
-def test_widget_shows_duration_and_confidence_percent(qt_app) -> None:
+def test_widget_has_no_bottom_history_bar(qt_app) -> None:
     _, widget = _widget()
-    widget.apply_snapshot(_snapshot(DeskStatus.FOCUSED, duration=312.0, confidence=0.78))
+    assert not hasattr(widget, "stripe")
+    assert not hasattr(widget, "separator")
+
+
+def test_widget_shows_duration_without_confidence_bar(qt_app) -> None:
+    _, widget = _widget()
+    widget.apply_snapshot(_snapshot(DeskStatus.FOCUSED, duration=312))
     assert widget.duration_label.text() == "5分12秒"
-    assert widget.confidence_value.text() == "78%"
-    assert widget.confidence_bar.value() == 78
-    widget.deleteLater()
+    assert not hasattr(widget, "confidence_bar")
 
 
-def test_pause_button_glyph_has_no_emoji_presentation(qt_app) -> None:
-    """Control glyphs must not fall back to the colour emoji font."""
-    from deskmate.ui.widget_window import GLYPH_DETAIL, GLYPH_PAUSE, GLYPH_RESUME, GLYPH_SHARE
-
-    emoji_controls = {"⏸", "▶", "⏹", "⏯"}
-    for glyph in (GLYPH_DETAIL, GLYPH_SHARE, GLYPH_PAUSE, GLYPH_RESUME):
-        assert glyph not in emoji_controls
-        assert "️" not in glyph
-
-
-def test_pause_button_toggles_glyph_on_pause(qt_app) -> None:
-    from deskmate.ui.widget_window import GLYPH_PAUSE, GLYPH_RESUME
-
+def test_input_mode_is_shown_in_context_menu(qt_app) -> None:
     _, widget = _widget()
-    widget.apply_snapshot(_snapshot(DeskStatus.FOCUSED))
-    assert widget.pause_button.text() == GLYPH_PAUSE
-    widget.apply_snapshot(_snapshot(DeskStatus.UNKNOWN, system=SystemStatus.PAUSED))
-    assert widget.pause_button.text() == GLYPH_RESUME
-    widget.deleteLater()
+    widget.apply_source(SourceStatus.STREAMING.value, "metavision(live)")
+    assert widget._build_context_menu().actions()[0].text() == "LIVE"
+    widget.apply_source(SourceStatus.STREAMING.value, "dummy(demo)")
+    assert widget._build_context_menu().actions()[0].text() == "DUMMY MODE"
+    widget.apply_source(SourceStatus.ERROR.value, "metavision(live)")
+    assert widget._build_context_menu().actions()[0].text() == "CAMERA ERROR"
 
 
-def test_widget_renders_every_status_without_exception(qt_app) -> None:
+def test_header_has_no_mode_detail_or_pause_controls(qt_app) -> None:
     _, widget = _widget()
-    for status in DeskStatus:
-        for system in SystemStatus:
-            widget.apply_snapshot(_snapshot(status, system=system))
-    widget.deleteLater()
+    assert not hasattr(widget, "source_badge")
+    assert not hasattr(widget, "detail_button")
+    assert not hasattr(widget, "pause_button")
 
 
-# ------------------------------------------------------------------ character
-def test_every_animation_has_a_glyph_and_motion() -> None:
-    for animation in AnimationId:
-        assert animation in _GLYPHS
-        assert animation in _MOTION
+def test_ui_debug_menu_previews_each_state_and_break(qt_app) -> None:
+    _, widget = _widget()
+    widget.apply_snapshot(_snapshot(DeskStatus.IDLE))
+    menu = widget._build_context_menu()
+    debug_action = next(
+        action for action in menu.actions() if action.text() == "UIデバッグ"
+    )
+    debug_menu = debug_action.menu()
+    assert debug_menu is not None
 
-
-def test_glyphs_are_emoji_placeholders_not_ascii() -> None:
-    """status-definition.md 7.2 specifies emoji stand-ins until artwork exists."""
-    for animation, glyph in _GLYPHS.items():
-        assert any(ord(ch) > 0x2000 for ch in glyph), (animation, glyph)
-
-
-def test_shape_renderer_supports_all_animations() -> None:
-    config = load_config()
-    renderer = ShapeCharacterRenderer(resolve_theme(config.ui.theme), config.character)
-    assert renderer.available_animations == frozenset(AnimationId)
-
-
-def test_every_animation_maps_to_a_colour() -> None:
-    for animation in AnimationId:
-        assert animation_color(animation).startswith("#")
-
-
-def test_every_status_maps_to_a_distinct_colour() -> None:
-    for status in DeskStatus:
-        assert status in STATUS_COLORS
-        assert status_color(status).startswith("#")
-    assert len(set(STATUS_COLORS.values())) == len(DeskStatus)
-
-
-# ------------------------------------------------------------------ history stripe
-def test_stripe_merges_contiguous_runs(qt_app) -> None:
-    theme = resolve_theme("dark")
-    stripe = StatusStripe(theme, window_seconds=300.0)
-    for index in range(1, 6):
-        stripe.apply_snapshot(_snapshot(DeskStatus.FOCUSED, duration=float(index)))
-    for index in range(1, 4):
-        stripe.apply_snapshot(
-            _snapshot(DeskStatus.SHORT_BREAK, duration=float(index), changed=(index == 1))
-        )
-    runs = stripe._runs()
-    assert [run[2] for run in runs] == [DeskStatus.FOCUSED, DeskStatus.SHORT_BREAK]
-    stripe.deleteLater()
-
-
-def test_stripe_drops_samples_outside_its_window(qt_app) -> None:
-    stripe = StatusStripe(resolve_theme("dark"), window_seconds=5.0)
-    for index in range(1, 60):
-        stripe.apply_snapshot(
-            _snapshot(DeskStatus.WORKING, duration=float(index), changed=True)
-        )
-    assert len(stripe._samples) < 59
-    stripe.deleteLater()
-
-
-def test_stripe_clear_empties_history(qt_app) -> None:
-    stripe = StatusStripe(resolve_theme("dark"))
-    stripe.apply_snapshot(_snapshot(DeskStatus.FOCUSED))
-    stripe.clear()
-    assert not stripe._samples
-    stripe.deleteLater()
-
-
-def test_stripe_never_reads_feature_data() -> None:
-    """The stripe is fed StatusSnapshot only, so it needs no detail subscription.
-
-    Checked against identifiers rather than raw text: the module docstring names the
-    forbidden types on purpose to explain why they are absent.
-    """
-    import ast
-    import inspect
-
-    import deskmate.ui.status_stripe as module
-
-    tree = ast.parse(inspect.getsource(module))
-    identifiers = {
-        node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
-    } | {
-        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
-    } | {
-        alias.name for node in ast.walk(tree)
-        if isinstance(node, (ast.Import, ast.ImportFrom))
-        for alias in node.names
+    expected = {
+        "集中を表示": ("集中", AnimationId.RUNNING, False),
+        "非集中を表示": ("非集中", AnimationId.SITTING, False),
+        "離席中を表示": ("離席中", AnimationId.SLEEPING, False),
+        "休憩促しを表示": ("集中", AnimationId.BREAK, True),
     }
-    for forbidden in ("FeatureFrame", "DetailFrame", "EventWindow", "detail_updated"):
-        assert forbidden not in identifiers
+    for action in debug_menu.actions():
+        if action.text() not in expected:
+            continue
+        action.trigger()
+        label, animation, break_due = expected[action.text()]
+        assert widget.status_label.text() == label
+        assert widget.character_view._renderer._animation is animation
+        assert widget.break_banner.isHidden() == (not break_due)
+
+
+def test_ui_debug_preview_holds_until_automatic_mode(qt_app) -> None:
+    _, widget = _widget()
+    widget.apply_snapshot(_snapshot(DeskStatus.IDLE))
+    widget._set_debug_preview(DeskStatus.AWAY, False)
+    widget.apply_snapshot(_snapshot(DeskStatus.FOCUSED))
+    assert widget.status_label.text() == "離席中"
+
+    widget._clear_debug_preview()
+    assert widget.status_label.text() == "focused"
+
+
+def test_break_prompt_changes_character_and_shows_banner(qt_app) -> None:
+    _, widget = _widget()
+    snapshot = _snapshot(DeskStatus.FOCUSED, duration=1500, break_due=True)
+    widget.apply_snapshot(snapshot)
+    assert snapshot.status is DeskStatus.FOCUSED
+    assert snapshot.animation is AnimationId.BREAK
+    assert not widget.break_banner.isHidden()
+
+
+def test_main_window_has_no_away_caveat(qt_app) -> None:
+    """The main window stays clean: the sensor-limitation note is not shown here."""
+    _, widget = _widget()
+    widget.apply_snapshot(_snapshot(DeskStatus.AWAY))
+    assert not hasattr(widget, "note_label")
+    from deskmate.ui.labels import AWAY_NOTE_JA
+
+    labels = widget.findChildren(type(widget.status_label))
+    assert all(label.text() != AWAY_NOTE_JA for label in labels)
+
+
+def test_detail_status_header_shows_away_caveat_only_for_away(qt_app) -> None:
+    """The sensor-limitation note lives on the detail screen and only for away."""
+    from types import SimpleNamespace
+
+    from deskmate.character.renderer import create_renderer
+    from deskmate.core.enums import SystemStatus
+    from deskmate.core.types import StatusEstimate
+    from deskmate.ui.character_view import CharacterView
+    from deskmate.ui.detail_window import StatusHeader
+    from deskmate.ui.labels import AWAY_NOTE_JA
+    from deskmate.ui.theme import resolve_theme
+
+    config = load_config()
+    header = StatusHeader(
+        CharacterView(
+            create_renderer(config.character, resolve_theme(config.ui.theme)), 60
+        )
+    )
+
+    def frame(status: DeskStatus) -> SimpleNamespace:
+        return SimpleNamespace(
+            snapshot=_snapshot(status),
+            estimate=StatusEstimate(status, 0.8, "R", "reason"),
+        )
+
+    header.update_frame(frame(DeskStatus.AWAY))
+    assert header.note.text() == AWAY_NOTE_JA
+    header.update_frame(frame(DeskStatus.FOCUSED))
+    assert header.note.text() == ""
+
+
+def test_all_states_and_animations_have_colours() -> None:
+    assert set(STATUS_COLORS) == set(DeskStatus)
+    assert len(set(STATUS_COLORS.values())) == len(DeskStatus)
+    assert all(status_color(status).startswith("#") for status in DeskStatus)
+    assert all(animation_color(animation).startswith("#") for animation in AnimationId)
