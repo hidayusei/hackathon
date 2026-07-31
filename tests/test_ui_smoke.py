@@ -100,3 +100,18 @@ def test_event_camera_mode_opens_detail_with_character(qt_app) -> None:
 
     app.detail_window.close()
     app.widget.close()
+
+
+def test_ui_debug_preview_is_shared_with_detail_character(qt_app) -> None:
+    _, widget, detail = _windows()
+    widget.apply_snapshot(_snapshot(DeskStatus.IDLE))
+
+    widget._set_debug_preview(DeskStatus.FOCUSED, True)
+    qt_app.processEvents()
+
+    assert detail.character._renderer._animation is AnimationId.BREAK
+    assert detail._debug_snapshot is not None
+
+    widget._clear_debug_preview()
+    qt_app.processEvents()
+    assert detail._debug_snapshot is None

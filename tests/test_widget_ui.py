@@ -2,6 +2,9 @@
 
 from datetime import datetime
 
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
+
 from conftest import FakeClock
 from deskmate.config.loader import load_config
 from deskmate.core.enums import AnimationId, DeskStatus, SourceStatus, SystemStatus
@@ -60,6 +63,26 @@ def test_minimized_mode_shrinks_to_square(qt_app) -> None:
     assert widget.width() == character_size + 12
     assert widget.height() == character_size + 12
     assert widget.status_label.isHidden()
+
+
+def test_main_window_moves_when_character_is_dragged(qtbot) -> None:
+    _, widget = _widget()
+    widget.show()
+    widget.move(40, 40)
+    qtbot.wait(10)
+
+    start = widget.pos()
+    center = widget.character_view.rect().center()
+    QTest.mousePress(widget.character_view, Qt.MouseButton.LeftButton, pos=center)
+    QTest.mouseMove(widget.character_view, center + QPoint(30, 20))
+    QTest.mouseRelease(
+        widget.character_view,
+        Qt.MouseButton.LeftButton,
+        pos=center + QPoint(30, 20),
+    )
+
+    assert widget.pos() == start + QPoint(30, 20)
+    widget.close()
 
 
 def test_widget_has_no_bottom_history_bar(qt_app) -> None:
@@ -127,6 +150,29 @@ def test_ui_debug_preview_holds_until_automatic_mode(qt_app) -> None:
 
     widget._clear_debug_preview()
     assert widget.status_label.text() == "focused"
+
+
+def test_number_keys_select_ui_debug_previews(qtbot) -> None:
+    _, widget = _widget()
+    widget.apply_snapshot(_snapshot(DeskStatus.IDLE))
+    widget.show()
+    widget.activateWindow()
+    widget.setFocus()
+    qtbot.wait(10)
+
+    expected = {
+        Qt.Key.Key_1: (DeskStatus.FOCUSED, AnimationId.RUNNING, False),
+        Qt.Key.Key_2: (DeskStatus.IDLE, AnimationId.SITTING, False),
+        Qt.Key.Key_3: (DeskStatus.AWAY, AnimationId.SLEEPING, False),
+        Qt.Key.Key_4: (DeskStatus.FOCUSED, AnimationId.BREAK, True),
+    }
+    for key, (status, animation, break_due) in expected.items():
+        qtbot.keyClick(widget, key)
+        assert widget._debug_status is status
+        assert widget.character_view._renderer._animation is animation
+        assert widget.break_banner.isHidden() == (not break_due)
+
+    widget.close()
 
 
 def test_break_prompt_changes_character_and_shows_banner(qt_app) -> None:

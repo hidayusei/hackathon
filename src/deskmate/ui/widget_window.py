@@ -4,8 +4,16 @@ from dataclasses import replace
 from datetime import datetime
 from functools import partial
 
-from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QAction, QCloseEvent, QContextMenuEvent, QFont, QMouseEvent
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, Signal
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QContextMenuEvent,
+    QFont,
+    QKeySequence,
+    QMouseEvent,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -53,6 +61,7 @@ class WidgetWindow(QWidget):
         self.bridge = bridge
         self.config = config
         self._drag_origin: QPoint | None = None
+        self._system_move_active = False
         self._minimized = config.ui.widget.minimized
         self._paused = False
         self._last_live_snapshot: StatusSnapshot | None = None
@@ -88,6 +97,28 @@ class WidgetWindow(QWidget):
         self.duration_label = QLabel()
         self.duration_label.setObjectName("duration")
         self.break_banner = BreakBanner(self.bridge, self)
+        for draggable in (
+            self.character_view,
+            self.title_label,
+            self.state_dot,
+            self.status_label,
+            self.duration_label,
+        ):
+            draggable.installEventFilter(self)
+        previews = (
+            (Qt.Key.Key_1, DeskStatus.FOCUSED, False),
+            (Qt.Key.Key_2, DeskStatus.IDLE, False),
+            (Qt.Key.Key_3, DeskStatus.AWAY, False),
+            (Qt.Key.Key_4, DeskStatus.FOCUSED, True),
+        )
+        self._debug_shortcuts: list[QShortcut] = []
+        for key, status, break_due in previews:
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+            shortcut.activated.connect(
+                partial(self._set_debug_preview, status, break_due)
+            )
+            self._debug_shortcuts.append(shortcut)
 
     def _build_layout(self) -> None:
         header = QHBoxLayout()
@@ -225,8 +256,33 @@ class WidgetWindow(QWidget):
         self.toggle_minimized()
         event.accept()
 
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        """Forward drags from display children to the frameless main window."""
+
+        if isinstance(event, QMouseEvent):
+            if event.type() is QEvent.Type.MouseButtonPress:
+                self.mousePressEvent(event)
+                return event.isAccepted()
+            if event.type() is QEvent.Type.MouseMove:
+                self.mouseMoveEvent(event)
+                return event.isAccepted()
+            if event.type() is QEvent.Type.MouseButtonRelease:
+                self.mouseReleaseEvent(event)
+                return event.isAccepted()
+            if event.type() is QEvent.Type.MouseButtonDblClick:
+                self.mouseDoubleClickEvent(event)
+                return event.isAccepted()
+        return super().eventFilter(watched, event)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() is Qt.MouseButton.LeftButton:
+            handle = self.windowHandle()
+            if handle is not None and handle.startSystemMove():
+                self._system_move_active = True
+                self._drag_origin = None
+                event.accept()
+                return
+            self._system_move_active = False
             self._drag_origin = (
                 event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             )
@@ -241,6 +297,7 @@ class WidgetWindow(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() is Qt.MouseButton.LeftButton:
+            self._system_move_active = False
             self._drag_origin = None
             self.config.ui.widget.last_position = (self.x(), self.y())
             event.accept()
@@ -303,13 +360,16 @@ class WidgetWindow(QWidget):
         self._debug_status = status
         self._debug_break = break_due
         base = self._last_live_snapshot or self._initial_snapshot()
-        self._render_snapshot(self._debug_snapshot(base))
+        snapshot = self._debug_snapshot(base)
+        self._render_snapshot(snapshot)
+        self.bridge.set_debug_preview(snapshot)
 
     def _clear_debug_preview(self, _checked: bool = False) -> None:
         """Return the main window to the latest live pipeline result."""
 
         self._debug_status = None
         self._debug_break = False
+        self.bridge.set_debug_preview(None)
         if self._last_live_snapshot is not None:
             self._render_snapshot(self._last_live_snapshot)
 

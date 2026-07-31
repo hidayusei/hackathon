@@ -67,6 +67,8 @@ class DetailWindow(QMainWindow):
         super().__init__()
         self.bridge = bridge
         self.config = config
+        self._live_snapshot: StatusSnapshot | None = None
+        self._debug_snapshot: StatusSnapshot | None = None
         self.setWindowTitle(DETAIL_TITLE_JA)
         self.resize(900, 520)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -81,11 +83,21 @@ class DetailWindow(QMainWindow):
         root.addWidget(self.character, 0, Qt.AlignmentFlag.AlignCenter)
         self.setCentralWidget(central)
         bridge.detail_updated.connect(self.apply_detail)
+        bridge.debug_preview_updated.connect(self.apply_debug_preview)
 
     def apply_detail(self, detail: DetailFrame) -> None:
         """Update the two visible elements from one private frame."""
         self.event_panel.update_frame(detail)
-        self.character.apply_snapshot(detail.snapshot)
+        self._live_snapshot = detail.snapshot
+        self.character.apply_snapshot(self._debug_snapshot or detail.snapshot)
+
+    def apply_debug_preview(self, snapshot: StatusSnapshot | None) -> None:
+        """Apply or clear the UI-debug character shared by the main window."""
+
+        self._debug_snapshot = snapshot
+        current = snapshot or self._live_snapshot
+        if current is not None:
+            self.character.apply_snapshot(current)
 
     def showEvent(self, event: QShowEvent) -> None:
         """Subscribe when displayed."""

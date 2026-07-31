@@ -17,6 +17,7 @@ class UiBridge(QObject):
     stats_updated = Signal(object)
     notice_changed = Signal(str)
     source_updated = Signal(str, str)
+    debug_preview_updated = Signal(object)
 
     def __init__(self, runner: PipelineRunner, config: AppConfig) -> None:
         super().__init__()
@@ -69,6 +70,11 @@ class UiBridge(QObject):
     def force_status(self, status: DeskStatus | None) -> None:
         """Change debug-only forced status."""
         self._invoke("force_status", status.value if status else "")
+
+    def set_debug_preview(self, snapshot: StatusSnapshot | None) -> None:
+        """Share a UI-only preview with every DeskMate window."""
+
+        self.debug_preview_updated.emit(snapshot)
 
     def request_reconnect(self) -> None:
         """Ask the pipeline to reopen its input source."""
