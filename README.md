@@ -118,6 +118,9 @@ export PSEE_VAR_V4L2_BSIZE=1
 
 # 全画面表示
 .venv/bin/python -m deskmate --source metavision --fullscreen
+
+# 起動時からイベントカメラ表示とキャラクターを開く
+.venv/bin/python -m deskmate --source metavision --show-event-camera
 ```
 
 ## イベントカメラ側から渡すデータ
@@ -204,16 +207,15 @@ UIデバッグは表示だけを固定し、カメラ入力や実際の推定結
 
 右クリックの「詳細」から開きます。
 
-- イベント点群
-- 活動範囲と重心
-- イベントレートと変化量
-- 領域別活動量
-- 抽出特徴量
-- 現在状態と信頼度
-- 状態履歴
-- 適用ルールと推定理由
-- 入力ソース
-- 処理時間、drop数、queue状態
+- イベントカメラ表示
+- 状態に対応するキャラクター
+
+イベントカメラ表示には、`metavision_viewer`でも使われるOpenEB/Metavision SDKの
+フレーム生成器と標準配色を使用します。イベントは1処理窓あたり最大20万件まで描画します。
+`metavision_viewer`とDeskMateはカメラを同時に使用できないため、確認後は
+`metavision_viewer`を閉じてからDeskMateを起動してください。
+
+起動直後からこの画面を表示する場合は、`--show-event-camera`を指定します。
 
 右上の閉じるボタンで詳細画面だけを閉じます。詳細画面を閉じると点群表示用データの
 生成も止まり、メイン画面と状態推定はそのまま動き続けます。

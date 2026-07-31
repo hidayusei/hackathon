@@ -221,7 +221,7 @@ class WidgetUiConfig(StrictModel):
 class DetailUiConfig(StrictModel):
     """Detail/demo-window layout."""
 
-    max_preview_points: int = Field(5000, ge=1)
+    max_preview_points: int = Field(200_000, ge=1)
     history_seconds: int = Field(300, ge=1)
     refresh_hz: int = Field(10, ge=1)
     character_size: int = Field(120, ge=30)

@@ -83,7 +83,7 @@ ui:
     minimized_size: 96
     last_position: null
     minimized: false
-  detail: {max_preview_points: 5000, history_seconds: 300, refresh_hz: 10, character_size: 120}
+  detail: {max_preview_points: 200000, history_seconds: 300, refresh_hz: 10, character_size: 120}
 privacy:
   save_raw_events: false
   save_features: false

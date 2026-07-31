@@ -16,7 +16,12 @@ from deskmate.ui.widget_window import WidgetWindow
 class DeskMateApp:
     """Create the two-screen UI and worker pipeline."""
 
-    def __init__(self, config: AppConfig, headless: bool = False) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        headless: bool = False,
+        show_event_camera: bool = False,
+    ) -> None:
         if headless:
             os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         self.qt_app = QApplication.instance() or QApplication([])
@@ -25,6 +30,7 @@ class DeskMateApp:
         self.widget = None if headless else WidgetWindow(self.bridge, config)
         self.detail_window: DetailWindow | None = None
         self._headless = headless
+        self._show_event_camera = show_event_camera
         self.tray: TrayIcon | None = None
         self.thread = QThread()
         self.runner.moveToThread(self.thread)
@@ -47,6 +53,8 @@ class DeskMateApp:
                 self.qt_app.quit,
             )
             self.tray.show()
+            if self._show_event_camera:
+                self._show_detail()
         self.thread.start()
         return self.qt_app.exec()
 

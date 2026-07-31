@@ -5,6 +5,7 @@ from datetime import datetime
 from PySide6.QtCore import Qt
 
 from conftest import FakeClock
+from deskmate.app import DeskMateApp
 from deskmate.config.loader import load_config
 from deskmate.core.enums import AnimationId, DeskStatus, SystemStatus
 from deskmate.core.types import StatusSnapshot
@@ -79,3 +80,23 @@ def test_detail_open_close_controls_subscription(qt_app) -> None:
     detail.close()
     qt_app.processEvents()
     assert not bridge._runner._detail_subscription
+
+
+def test_event_camera_mode_opens_detail_with_character(qt_app) -> None:
+    config = load_config({"input": {"source": "dummy"}})
+    app = DeskMateApp(config, show_event_camera=True)
+
+    app.widget.show()
+    app._show_detail()
+    qt_app.processEvents()
+
+    assert app.detail_window is not None
+    assert app.detail_window.event_panel.isVisible()
+    assert app.detail_window.character.isVisible()
+    assert not hasattr(app.detail_window, "motion_panel")
+    assert not hasattr(app.detail_window, "region_panel")
+    assert not hasattr(app.detail_window, "feature_panel")
+    assert not hasattr(app.detail_window, "history_panel")
+
+    app.detail_window.close()
+    app.widget.close()

@@ -21,6 +21,7 @@ def main() -> int:
     parser.add_argument("--replay")
     parser.add_argument("--raw")
     parser.add_argument("--fullscreen", action="store_true")
+    parser.add_argument("--show-event-camera", action="store_true")
     parser.add_argument("--break-demo", action="store_true")
     parser.add_argument("--config")
     args = parser.parse_args()
@@ -51,7 +52,11 @@ def main() -> int:
         config_path=Path(args.config) if args.config else None,
     )
     setup_logging(config.logging, config.privacy)
-    app = DeskMateApp(config, headless=args.headless)
+    app = DeskMateApp(
+        config,
+        headless=args.headless,
+        show_event_camera=args.show_event_camera,
+    )
     if args.headless:
         app.runner.status_changed.connect(
             lambda snapshot: print(

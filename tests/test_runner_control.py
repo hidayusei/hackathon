@@ -95,11 +95,11 @@ def _stop_threaded_runner(runner: PipelineRunner, thread: QThread, qtbot) -> Non
 
 def test_queued_detail_subscription_updates_from_real_worker_thread(qtbot) -> None:
     """A real detail window must receive and render frames from its worker QThread."""
-    config = load_config()
+    config = load_config({"input": {"source": "dummy"}})
     runner = PipelineRunner(config)
     bridge = UiBridge(runner, config)
     detail = DetailWindow(bridge, config)
-    initial_stats = detail.source_stats.text()
+    initial_window = detail.event_panel.window_label.text()
     thread = QThread()
     runner.moveToThread(thread)
     thread.started.connect(runner.start)
@@ -107,11 +107,11 @@ def test_queued_detail_subscription_updates_from_real_worker_thread(qtbot) -> No
     try:
         detail.show()
         qtbot.waitUntil(
-            lambda: detail.source_stats.text() != initial_stats,
+            lambda: detail.event_panel.window_label.text() != initial_window,
             timeout=3000,
         )
         assert runner._detail_subscription
-        assert "dummy" in detail.source_stats.text()
+        assert detail.event_panel.window_label.text()
     finally:
         detail.close()
         detail.deleteLater()
@@ -120,7 +120,7 @@ def test_queued_detail_subscription_updates_from_real_worker_thread(qtbot) -> No
 
 def test_queued_pause_and_resume_reach_real_worker_thread(qtbot) -> None:
     """Pause and resume requests must execute while the worker loop is active."""
-    config = load_config()
+    config = load_config({"input": {"source": "dummy"}})
     runner = PipelineRunner(config)
     bridge = UiBridge(runner, config)
     thread = QThread()
