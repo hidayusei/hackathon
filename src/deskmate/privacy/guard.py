@@ -33,8 +33,12 @@ class PrivacyGuard:
         """Reject a call site that must never perform external sending."""
         raise PrivacyViolationError(f"external sending is forbidden here: {destination}")
 
-    def assert_can_send_external(self, destination: str) -> None:
-        """Authorize one private or loopback unicast IPv4 destination."""
+    def assert_can_send_external(
+        self,
+        destination: str,
+        allow_public_destination: bool = False,
+    ) -> None:
+        """Authorize one numeric unicast IPv4 destination with explicit permission."""
         if not self.can_send_external():
             raise PrivacyViolationError("external sending is disabled")
         try:
@@ -43,7 +47,7 @@ class PrivacyGuard:
             raise PrivacyViolationError("UDP destination must be a numeric IPv4 address") from exc
         if address.version != 4:
             raise PrivacyViolationError("UDP destination must use IPv4")
-        if not (address.is_private or address.is_loopback):
+        if not allow_public_destination and not (address.is_private or address.is_loopback):
             raise PrivacyViolationError("UDP destination must be private or loopback")
         if address.is_multicast or address.is_unspecified or destination == "255.255.255.255":
             raise PrivacyViolationError("UDP destination must be unicast")

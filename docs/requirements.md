@@ -137,7 +137,7 @@
 |----|------|--------|
 | FR-NET-1 | Pi は生イベントを同一 LAN の単一ユニキャスト IPv4 宛先へ複製送信できること | 必須 |
 | FR-NET-2 | `udp.output.enabled` と `privacy.allow_external_send` が共に true の場合だけ送信すること | 必須 |
-| FR-NET-3 | 送信は既定無効で、broadcast・multicast・公開 IP を拒否すること | 必須 |
+| FR-NET-3 | 送信は既定無効。公開 IP は追加許可を必要とし、broadcast・multicastを拒否すること | 必須 |
 | FR-NET-4 | datagram 上限を守り、連番と fragment 番号で再構成できること | 必須 |
 | FR-NET-5 | 生イベントを送受信側のいずれでも保存しないこと | 必須 |
 
@@ -268,7 +268,7 @@
 | DoD-14 | 全単体テストが成功する | `pytest` |
 | DoD-15 | **Raspberry Pi 上でライブ入力から 3 状態が表示される** | 実機確認（人間が行う） |
 | DoD-16 | UDP の分割・再構成・欠損破棄・順序逆転が正しく処理される | `tests/test_udp_transport.py` |
-| DoD-17 | 既定では socket を生成せず、危険な宛先を拒否する | `tests/test_udp_transport.py` |
+| DoD-17 | 既定では socket を生成せず、公開 IP は追加許可なしで拒否する | `tests/test_udp_transport.py` |
 
 DoD-15 のみ実機が必要。それ以外は Windows で確認できる。
 

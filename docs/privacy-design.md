@@ -22,7 +22,7 @@ DeskMate はそれらを「見ない」ことを前提に設計する。
 | PV-1 | RGB 画像を使用しない | 依存に撮像系ライブラリを入れない。入力は `EventBatch`（x, y, t, p）のみを受け取る型で固定する | `requirements.txt` レビュー、`EventSource` の型 |
 | PV-2 | PC 画面や書類の内容を取得しない | 画面キャプチャ API・ファイル走査・アクティブウィンドウ取得を実装しない | `mss` / `pyautogui` / `win32gui` を import しない |
 | PV-3 | 生のイベントデータを原則保存しない | `privacy.save_raw_events` の既定 `false`。保存は `PrivacyGuard` を通らないと実行できない | `tests/test_privacy_guard.py` |
-| PV-4 | **UDP 生イベント送信を明示的な二重許可に限定する** | `udp.output.enabled` と `privacy.allow_external_send` が共に true、かつ private/loopback の単一 IPv4 宛先だけ許可 | `tests/test_udp_transport.py` |
+| PV-4 | **UDP 生イベント送信を明示的な許可に限定する** | `udp.output.enabled` と `privacy.allow_external_send` が共に true。公開 IPv4 は送受信側の追加許可も必要 | `tests/test_udp_transport.py` |
 | PV-5 | 状態推定は端末内で完結する | 全処理が `src/deskmate/pipeline/` 内。クラウド API を使わない | 依存レビュー |
 | PV-6 | 詳細画面を閉じている間、点群を生成しない | `DetailFrame` は `set_detail_subscription(True)` の間だけ生成する | `tests/test_runner.py` |
 | PV-7 | ユーザが推定処理を停止できる | ウィジェットの停止ボタン / 右クリックメニュー。停止中は入力の読み取り自体を止める | `tests/test_runner_control.py` |
@@ -151,8 +151,9 @@ README にも要約を掲載する。**「安全です」で終わらせない�
 UDP 生イベント転送だけを例外として実装する。
 
 - 既定値は `udp.output.enabled: false`、`privacy.allow_external_send: false`。
-- private または loopback の単一 IPv4 アドレスだけを許可する。ホスト名、broadcast、
-  multicast、unspecified、public IP は拒否する。
+- 既定では private または loopback の単一 IPv4 アドレスだけを許可する。公開 IPv4 は
+  送信側 `allow_public_destination` と受信側 `allow_public_sender` の追加許可が必要。
+  ホスト名、broadcast、multicast、unspecified は常に拒否する。
 - UDP は暗号化・認証・到達保証を持たない。信頼できない LAN では有効化しない。
 - パケットには座標と時刻が含まれ、動きの形状を再構成できる。送受信側とも保存しない。
 - 欠損 fragment はタイムアウト後に破棄し、ログには座標を出さない。
@@ -166,7 +167,7 @@ UDP 生イベント転送だけを例外として実装する。
 - [ ] `src/deskmate/` で `mss` / `pyautogui` / `win32gui` / `requests` / `httpx` / `cv2` を import していない
 - [ ] `SourceKind.UDP` は受信専用で、その他のネットワーク種別が無い
 - [ ] UDP 送信の既定値が二つとも `false`
-- [ ] 公開 IP・broadcast・multicast・unspecified 宛先が拒否される
+- [ ] 公開 IP は追加許可なしで拒否され、broadcast・multicast・unspecified は常に拒否される
 - [ ] `StatusSnapshot` のフィールドが [status-definition.md](status-definition.md) §9 の項目のみである（座標・特徴量が無い）
 - [ ] `privacy.save_raw_events` / `save_features` / `logging.log_features` / `debug.enabled` の既定がすべて `false`
 - [ ] 既定設定で起動 → 5 分放置しても `data/` 配下にファイルが生成されない

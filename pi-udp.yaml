@@ -5,6 +5,7 @@ udp:
   output:
     enabled: true
     destination_host: "163.221.192.32"
+    allow_public_destination: true
     destination_port: 5005
     max_datagram_bytes: 1200
     stream_id: 1

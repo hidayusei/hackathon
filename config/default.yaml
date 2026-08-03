@@ -23,11 +23,12 @@ input:
     rate_scale: 1.0
   file: {path: null, speed: 1.0, loop: true}
   hdf5: {path: null, events_dataset: /events, speed: 1.0, loop: false}
-  udp: {bind_host: "0.0.0.0", allowed_host: "127.0.0.1", port: 5005, reassembly_timeout_ms: 500, max_batch_events: 200000, max_pending_batches: 64}
+  udp: {bind_host: "0.0.0.0", allowed_host: "127.0.0.1", allow_public_sender: false, port: 5005, reassembly_timeout_ms: 500, max_batch_events: 200000, max_pending_batches: 64}
 udp:
   output:
     enabled: false
     destination_host: "127.0.0.1"
+    allow_public_destination: false
     destination_port: 5005
     max_datagram_bytes: 1200
     stream_id: 1

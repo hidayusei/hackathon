@@ -69,6 +69,7 @@ class UdpInputConfig(StrictModel):
 
     bind_host: str = "0.0.0.0"
     allowed_host: str = "127.0.0.1"
+    allow_public_sender: bool = False
     port: int = Field(5005, ge=1, le=65535)
     reassembly_timeout_ms: int = Field(500, ge=1, le=60_000)
     max_batch_events: int = Field(200_000, ge=1)
@@ -96,6 +97,7 @@ class UdpOutputConfig(StrictModel):
 
     enabled: bool = False
     destination_host: str = "127.0.0.1"
+    allow_public_destination: bool = False
     destination_port: int = Field(5005, ge=1, le=65535)
     max_datagram_bytes: int = Field(1200, ge=64, le=65_507)
     stream_id: int = Field(1, ge=0, le=4_294_967_295)

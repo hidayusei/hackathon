@@ -7,7 +7,7 @@ import pytest
 
 from deskmate.config.loader import load_config
 from deskmate.config.schema import PrivacyConfig, UdpInputConfig, UdpOutputConfig
-from deskmate.core.errors import DecodeError, PrivacyViolationError
+from deskmate.core.errors import ConfigError, DecodeError, PrivacyViolationError
 from deskmate.core.types import EventBatch
 from deskmate.network.udp_protocol import HEADER, UdpReassembler, encode_batch
 from deskmate.network.udp_sender import UdpEventSender
@@ -27,6 +27,8 @@ def test_udp_output_is_disabled_by_default() -> None:
     config = load_config()
     assert not config.udp.output.enabled
     assert not config.privacy.allow_external_send
+    assert not config.udp.output.allow_public_destination
+    assert not config.input.udp.allow_public_sender
 
 
 def test_disabled_sender_does_not_create_socket(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,6 +54,24 @@ def test_privacy_guard_rejects_non_lan_unicast(destination: str) -> None:
 @pytest.mark.parametrize("destination", ["127.0.0.1", "10.2.3.4", "172.16.1.2", "192.168.1.10"])
 def test_privacy_guard_allows_private_ipv4(destination: str) -> None:
     PrivacyGuard(PrivacyConfig(allow_external_send=True)).assert_can_send_external(destination)
+
+
+def test_explicit_permission_allows_public_unicast() -> None:
+    PrivacyGuard(PrivacyConfig(allow_external_send=True)).assert_can_send_external(
+        "163.221.192.32",
+        allow_public_destination=True,
+    )
+
+
+def test_udp_source_requires_permission_for_public_sender() -> None:
+    with pytest.raises(ConfigError):
+        UdpEventSource(UdpInputConfig(allowed_host="163.221.192.33"))
+    UdpEventSource(
+        UdpInputConfig(
+            allowed_host="163.221.192.33",
+            allow_public_sender=True,
+        )
+    )
 
 
 def test_permission_is_required_even_when_udp_is_enabled() -> None:

@@ -791,11 +791,12 @@ payload は 1 event 13 byte の `x: >u2, y: >u2, t: >i8, p: i1`。datagram は
 ```yaml
 input:
   source: auto
-  udp: {bind_host: "0.0.0.0", allowed_host: "127.0.0.1", port: 5005, reassembly_timeout_ms: 500, max_batch_events: 200000, max_pending_batches: 64}
+  udp: {bind_host: "0.0.0.0", allowed_host: "127.0.0.1", allow_public_sender: false, port: 5005, reassembly_timeout_ms: 500, max_batch_events: 200000, max_pending_batches: 64}
 udp:
   output:
     enabled: false
     destination_host: "127.0.0.1"
+    allow_public_destination: false
     destination_port: 5005
     max_datagram_bytes: 1200
     stream_id: 1
@@ -803,8 +804,10 @@ privacy:
   allow_external_send: false
 ```
 
-送信先は数値 IPv4 の private/loopback unicast のみ。`PrivacyGuard.assert_can_send_external()`
-が二重許可と宛先を検証する。送信エラーは座標を含めずログに残し、推定処理は継続する。
+送信先は数値 IPv4 unicast のみ。既定は private/loopback に限定する。公開 IPv4 は
+`allow_public_destination: true`、受信元は `allow_public_sender: true` の追加許可が必要。
+`PrivacyGuard.assert_can_send_external()` が許可と宛先を検証する。送信エラーは座標を含めず
+ログに残し、推定処理は継続する。
 UDP は暗号化・認証・再送を提供しないため、信頼できる同一 LAN 専用とする。
 
 ### 7.3 実機データを Windows で読むための経路（重要）

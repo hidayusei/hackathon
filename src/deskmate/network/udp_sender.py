@@ -26,7 +26,10 @@ class UdpEventSender:
         """Validate privacy permission and create the socket when enabled."""
         if not self.enabled or self._socket is not None:
             return
-        self._guard.assert_can_send_external(self._config.destination_host)
+        self._guard.assert_can_send_external(
+            self._config.destination_host,
+            self._config.allow_public_destination,
+        )
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     def send(self, batch: EventBatch) -> None:

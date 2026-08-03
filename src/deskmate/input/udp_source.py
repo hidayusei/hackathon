@@ -29,8 +29,13 @@ class UdpEventSource(EventSource):
             allowed = ipaddress.IPv4Address(config.allowed_host)
         except ipaddress.AddressValueError as exc:
             raise ConfigError("input.udp.allowed_host must be a numeric IPv4 address") from exc
-        if not (allowed.is_private or allowed.is_loopback) or allowed.is_multicast or allowed.is_unspecified:
+        if (
+            not config.allow_public_sender
+            and not (allowed.is_private or allowed.is_loopback)
+        ):
             raise ConfigError("input.udp.allowed_host must be private or loopback unicast")
+        if allowed.is_multicast or allowed.is_unspecified:
+            raise ConfigError("input.udp.allowed_host must be unicast")
         self._allowed_host = str(allowed)
 
     @property

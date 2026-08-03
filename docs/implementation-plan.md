@@ -251,7 +251,7 @@ Raspberry Pi 側の導入は [architecture.md](architecture.md) §26 を参照�
 
 実装順は protocol → PrivacyGuard/config → sender/source → runner/factory → tests。
 テストは既定無効、二重許可、宛先制限、datagram 上限、空/単一/分割 batch、重複、
-順序逆転、欠損タイムアウト、不正 header、送受信 loopback を検証する。
+順序逆転、欠損タイムアウト、不正 header、公開 IPv4 の追加許可を検証する。
 
 完了条件: `pytest` 全通過、UDP 無効時に socket を生成しない、受信結果の dtype と値が
 元の `EventBatch` に一致する。
