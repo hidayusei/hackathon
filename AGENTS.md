@@ -133,7 +133,9 @@ Codex 用のプロンプトは `scripts/prompts/migrate-01.md` 〜 `migrate-06.m
    詳細画面が閉じている間は `DetailFrame` を生成しない（PV-6）。
 4. **ログに座標を出力しない。** `DEBUG` レベルでも禁止。
 5. **保存・送信は `PrivacyGuard` を通す。** 直接 `open(path, "w")` でイベントを書かない。
-6. **ネットワーク送信のコードを書かない。** `requests` / `httpx` / `socket` の送信を実装しない。
+6. **UDP 生イベント転送は限定的に許可する。** `docs/architecture.md` §7.5 の形式に限り、
+   同一 LAN の単一ユニキャスト宛先へ標準ライブラリ `socket` で送受信してよい。
+   送信は `PrivacyGuard` と `udp.output.enabled` の両方の許可を必要とする。
 7. **画面キャプチャ・アクティブウィンドウ取得を実装しない。**
    `mss` / `pyautogui` / `win32gui` / `cv2` を import しない。
 8. **既定値を `false` から変えない。**
@@ -166,7 +168,7 @@ Codex 用のプロンプトは `scripts/prompts/migrate-01.md` 〜 `migrate-06.m
 **変更してはならない決定事項**（提案は歓迎するが、独断で変えない）:
 
 - 技術構成: Python + PySide6 の単一プロセス構成
-- **Raspberry Pi 内で完結する構成**（外部送信を作らない）
+- UDP が無効な既定構成では Raspberry Pi 内で完結する。UDP は §4 と設計書の制約内に限る
 - **`DeskStatus` の 3 種**（`away`=離席中 / `focused`=集中 / `idle`=非集中）と表示文言
 - **「不在です」「席にいません」と人の所在を断定しない方針**
   （表示名としての「離席中」は採用する。`docs/status-definition.md` §10）
@@ -184,7 +186,7 @@ Codex 用のプロンプトは `scripts/prompts/migrate-01.md` 〜 `migrate-06.m
 - `git commit` / `git push` を実行しない（ユーザが行う）。
 - リポジトリ外のファイルを変更しない。特に `C:\Users\yusei\dev\` 配下の他プロジェクト、
   `EVENT_CAMERA`、`OpenEB` は**読み取りのみ**。編集・移動・削除をしない。
-- 外部サービスへ接続しない（パッケージインストールを除く）。
+- 外部サービスへ接続しない（パッケージインストールと明示的な同一 LAN UDP を除く）。
 - `docs/` 配下の設計書を書き換えない（`docs/decisions.md` の追記のみ可）。
 - **`README.md` を書き換えない。** README は設計担当（Claude Code）が管理する。
   ただし、あなたの変更で README の記述が古くなった場合（起動コマンド・依存関係・

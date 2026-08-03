@@ -7,7 +7,7 @@ from conftest import make_window
 from deskmate.config.loader import load_config
 from deskmate.core.enums import RegionId
 from deskmate.core.errors import PipelineError
-from deskmate.pipeline.features import FeatureExtractor
+from deskmate.pipeline.features import BackgroundEventFilter, FeatureExtractor
 from deskmate.pipeline.regions import RegionMap, RegionRect
 
 
@@ -83,3 +83,43 @@ def test_out_of_sensor_coordinate_raises() -> None:
     window = make_window(np.array([400], dtype=np.uint16), np.array([1]))
     with pytest.raises(PipelineError):
         _extractor().extract(window)
+
+
+def test_background_filter_calibrates_then_subtracts_stationary_events() -> None:
+    config = load_config()
+    background = BackgroundEventFilter(config.sensor, 0.2, 0.0)
+    stationary = make_window(np.asarray([10]), np.asarray([20]))
+
+    assert background.apply(stationary).x.size == 0
+    assert background.ready
+    assert background.apply(stationary).x.size == 0
+
+    moving = make_window(
+        np.asarray([10, 10, 30]),
+        np.asarray([20, 20, 40]),
+        index=1,
+    )
+    filtered = background.apply(moving)
+    assert np.array_equal(filtered.x, np.asarray([10, 30], dtype=np.uint16))
+    assert np.array_equal(filtered.y, np.asarray([20, 40], dtype=np.uint16))
+    assert background.preview_window is not None
+    assert np.array_equal(background.preview_window.x, filtered.x)
+
+
+def test_background_residual_threshold_keeps_densest_excess_events() -> None:
+    config = load_config()
+    background = BackgroundEventFilter(config.sensor, 0.2, 5.0)
+    background.apply(make_window(np.asarray([10]), np.asarray([20])))
+    moving = make_window(
+        np.asarray([10, 10, 10, 30]),
+        np.asarray([20, 20, 20, 40]),
+        index=1,
+    )
+
+    filtered = background.apply(moving)
+
+    assert filtered.x.size == 2
+    assert np.all(filtered.x == 10)
+    assert np.all(filtered.y == 20)
+    assert background.preview_window is not None
+    assert background.preview_window.x.size == 3

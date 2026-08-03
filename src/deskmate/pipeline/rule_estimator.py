@@ -94,5 +94,11 @@ class RuleStatusEstimator(StatusEstimator):
                 config.high_activity_eps - config.idle_eps,
             ),
             "R3_idle",
-            "focused conditions not met",
+            (
+                f"rate_short={smoothed.rate_short:.3f}, "
+                f"focus_share={focus_share:.3f}, "
+                f"area={smoothed.area_short:.3f}, "
+                f"rate_cv={smoothed.rate_cv_10s:.3f}, "
+                f"active_seconds={smoothed.active_seconds:.3f}"
+            ),
         )

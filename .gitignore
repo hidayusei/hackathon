@@ -10,3 +10,4 @@ logs/
 config/local.yaml
 scripts/logs/
 scripts/.codex-progress.json
+*.mp4

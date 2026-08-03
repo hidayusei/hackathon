@@ -26,11 +26,13 @@ from deskmate.core.types import (
     StatusSnapshot,
 )
 from deskmate.input.factory import create_event_source
+from deskmate.network.udp_sender import UdpEventSender
+from deskmate.privacy.guard import PrivacyGuard
 
 from .break_tracker import BreakTracker
 from .duration import DurationTracker
 from .estimator import create_estimator
-from .features import FeatureExtractor
+from .features import BackgroundEventFilter, FeatureExtractor
 from .history import FeatureHistory
 from .regions import RegionMap, RegionRect
 from .smoother import StatusSmoother
@@ -68,6 +70,12 @@ class PipelineRunner(QObject):
             config.window.grid_rows,
             config.estimation.idle_eps,
         )
+        self.background_filter = BackgroundEventFilter(
+            config.sensor,
+            config.ui.detail.calibration_seconds,
+            config.estimation.background_residual_eps,
+        )
+        self._background_enabled = False
         self.history = FeatureHistory(config.features, config.estimation, config.sensor)
         self.estimator = create_estimator(config.estimation)
         self.smoother = StatusSmoother(config.smoothing, self.clock)
@@ -76,6 +84,7 @@ class PipelineRunner(QObject):
         )
         self.break_tracker = BreakTracker(config.break_prompt, self.clock)
         self.source = None
+        self.udp_sender = UdpEventSender(config.udp.output, PrivacyGuard(config.privacy))
         self._running = False
         self._paused = False
         self._detail_subscription = False
@@ -91,6 +100,7 @@ class PipelineRunner(QObject):
     def _reset_components(self) -> None:
         self.windower.reset()
         self.extractor.reset()
+        self.background_filter.reset()
         self.history.reset()
         self.estimator.reset()
         self.smoother.reset()
@@ -104,6 +114,8 @@ class PipelineRunner(QObject):
         if self._running:
             return
         self.source = create_event_source(self.config.input, self.config.sensor)
+        self.udp_sender.open()
+        self._configure_source_profile(self.source.name)
         self._running = True
         self.stats.source_name = self._source_display_name()
         try:
@@ -116,6 +128,24 @@ class PipelineRunner(QObject):
             self._handle_source_error(exc)
         self._loop()
 
+    def _configure_source_profile(self, source_name: str) -> None:
+        """Select calibrated live-camera rules without changing dummy rules."""
+        self._background_enabled = source_name.startswith("metavision")
+        estimation = self.config.estimation
+        if self._background_enabled:
+            camera = estimation.metavision
+            estimation = estimation.model_copy(
+                update={
+                    "idle_eps": camera.idle_eps,
+                    "focus_min_eps": camera.focus_min_eps,
+                    "focus_region_share": camera.focus_region_share,
+                    "focus_max_bbox_area_ratio": camera.focus_max_bbox_area_ratio,
+                    "focus_max_activity_cv": camera.focus_max_activity_cv,
+                }
+            )
+        self.extractor.set_idle_eps(estimation.idle_eps)
+        self.estimator = create_estimator(estimation)
+
     @Slot()
     def stop(self) -> None:
         """Stop processing and close the source idempotently."""
@@ -123,6 +153,7 @@ class PipelineRunner(QObject):
         if self.source is not None:
             self.source.request_stop()
             self.source.close()
+        self.udp_sender.close()
 
     @Slot(bool)
     def set_paused(self, paused: bool) -> None:
@@ -261,6 +292,12 @@ class PipelineRunner(QObject):
                     self._process_window(window)
             return
         self._last_data_at = now
+        try:
+            self.udp_sender.send(batch)
+        except PrivacyViolationError:
+            raise
+        except OSError as exc:
+            LOGGER.warning("UDP event send failed: %s", exc)
         self.stats.source_status = self.source.status
         self.stats.source_name = self._source_display_name()
         for window in self.windower.push(batch):
@@ -291,13 +328,22 @@ class PipelineRunner(QObject):
     def _process_window(self, window: EventWindow) -> StatusSnapshot:
         """Synchronously process one window; exposed for deterministic tests."""
         started = perf_counter()
-        frame = self.extractor.extract(window)
+        raw_event_count = window.x.size
+        processed_window = (
+            self.background_filter.apply(window)
+            if self._background_enabled
+            else window
+        )
+        frame = self.extractor.extract(processed_window)
         smoothed = self.history.update(frame)
         estimate = self.estimator.estimate(frame, smoothed)
         if self._forced_status is not None:
             estimate = StatusEstimate(self._forced_status, 1.0, "debug_force", "forced")
         now = self.clock.monotonic()
-        if self.history.is_warm:
+        background_ready = (
+            not self._background_enabled or self.background_filter.ready
+        )
+        if self.history.is_warm and background_ready:
             self._system_status = SystemStatus.RUNNING
         result = self.smoother.update(
             estimate,
@@ -308,7 +354,7 @@ class PipelineRunner(QObject):
         break_state = self.break_tracker.update(
             result.status,
             self._system_status,
-            window.duration_s,
+            processed_window.duration_s,
             now,
         )
         snapshot = StatusSnapshot(
@@ -333,18 +379,29 @@ class PipelineRunner(QObject):
         if snapshot.changed:
             self.status_changed.emit(snapshot)
         if self._detail_subscription:
-            step = self._preview_step(window.x.size)
+            preview_window = processed_window
+            if self._background_enabled:
+                preview_window = (
+                    self.background_filter.preview_window or processed_window
+                )
+            step = self._preview_step(preview_window.x.size)
             detail = DetailFrame(
                 snapshot,
                 frame,
                 smoothed,
                 estimate,
-                window.x[::step].copy(),
-                window.y[::step].copy(),
-                window.p[::step].copy(),
+                preview_window.x[::step].copy(),
+                preview_window.y[::step].copy(),
+                preview_window.p[::step].copy(),
                 self.duration.history,
                 self.history.rate_series(60),
                 self._stats_copy(),
+                int(raw_event_count),
+                (
+                    self.background_filter.remaining_seconds
+                    if self._background_enabled
+                    else 0.0
+                ),
             )
             self.detail_ready.emit(detail)
         return snapshot

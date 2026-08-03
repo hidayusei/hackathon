@@ -75,6 +75,15 @@ def test_estimation_defaults_match_current_spec() -> None:
         assert getattr(estimation, key) == pytest.approx(value)
 
 
+def test_metavision_profile_ignores_position_and_accepts_measured_spread() -> None:
+    profile = load_config().estimation.metavision
+    assert profile.idle_eps == pytest.approx(10_000.0)
+    assert profile.focus_min_eps == pytest.approx(15_000.0)
+    assert profile.focus_region_share == pytest.approx(0.0)
+    assert profile.focus_max_bbox_area_ratio == pytest.approx(0.75)
+    assert profile.focus_max_activity_cv == pytest.approx(3.0)
+
+
 def test_break_defaults_are_25_minutes_and_three_minute_reset() -> None:
     config = load_config().break_prompt
     assert config.after_seconds == pytest.approx(1500.0)

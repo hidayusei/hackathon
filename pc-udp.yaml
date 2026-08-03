@@ -1,0 +1,16 @@
+input:
+  source: udp
+  udp:
+    bind_host: "0.0.0.0"
+    allowed_host: "163.221.192.170"
+    port: 5005
+    reassembly_timeout_ms: 500
+    max_batch_events: 200000
+    max_pending_batches: 64
+
+udp:
+  output:
+    enabled: false
+
+privacy:
+  allow_external_send: false

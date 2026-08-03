@@ -129,7 +129,7 @@ def test_ui_debug_menu_previews_each_state_and_break(qt_app) -> None:
         "集中を表示": ("集中", AnimationId.RUNNING, False),
         "非集中を表示": ("非集中", AnimationId.SITTING, False),
         "離席中を表示": ("離席中", AnimationId.SLEEPING, False),
-        "休憩促しを表示": ("集中", AnimationId.BREAK, True),
+        "休憩促しを表示": ("休憩促し", AnimationId.BREAK, True),
     }
     for action in debug_menu.actions():
         if action.text() not in expected:
@@ -150,6 +150,29 @@ def test_ui_debug_preview_holds_until_automatic_mode(qt_app) -> None:
 
     widget._clear_debug_preview()
     assert widget.status_label.text() == "focused"
+
+
+def test_every_ui_debug_duration_increases(monkeypatch, qt_app) -> None:
+    now = 100.0
+    monkeypatch.setattr("deskmate.ui.widget_window.monotonic", lambda: now)
+    _, widget = _widget()
+    widget.apply_snapshot(_snapshot(DeskStatus.IDLE))
+    previews = (
+        (DeskStatus.FOCUSED, False),
+        (DeskStatus.IDLE, False),
+        (DeskStatus.AWAY, False),
+        (DeskStatus.FOCUSED, True),
+    )
+    for status, break_due in previews:
+        widget._set_debug_preview(status, break_due)
+        expected_start = "50分0秒" if break_due else "0秒"
+        assert widget.duration_label.text() == expected_start
+
+        now += 3.0
+        widget.apply_snapshot(_snapshot(DeskStatus.IDLE))
+        expected_elapsed = "50分3秒" if break_due else "3秒"
+        assert widget.duration_label.text() == expected_elapsed
+        now += 1.0
 
 
 def test_number_keys_select_ui_debug_previews(qtbot) -> None:

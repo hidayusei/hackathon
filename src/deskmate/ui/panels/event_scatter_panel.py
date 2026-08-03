@@ -7,8 +7,11 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 from deskmate.config.schema import SensorConfig
 from deskmate.core.types import DetailFrame, EVENT_DTYPE_METAVISION
 from deskmate.ui.labels import (
+    BACKGROUND_SUBTRACTED_JA,
+    CALIBRATING_JA,
     EVENT_COUNT_JA,
     EVENTS_PANEL_JA,
+    RULE_JA,
     TRUNCATED_JA,
     WINDOW_JA,
 )
@@ -50,30 +53,54 @@ class EventScatterPanel(QWidget):
 
     def update_frame(self, detail: DetailFrame) -> None:
         """Render one complete window using the same generator as Metavision Viewer."""
-        events = np.empty(detail.preview_x.size, dtype=EVENT_DTYPE_METAVISION)
-        events["x"] = detail.preview_x
-        events["y"] = detail.preview_y
-        events["p"] = detail.preview_p
-        events["t"] = np.arange(detail.preview_x.size, dtype=np.int64)
+        preview_x = detail.preview_x
+        preview_y = detail.preview_y
+        preview_p = detail.preview_p
+        events = np.empty(preview_x.size, dtype=EVENT_DTYPE_METAVISION)
+        events["x"] = preview_x
+        events["y"] = preview_y
+        events["p"] = preview_p
+        events["t"] = np.arange(preview_x.size, dtype=np.int64)
         image = np.empty(
             (self.configured_height, self.configured_width, 3),
             dtype=np.uint8,
         )
+        if events.size == 0:
+            image.fill(52)
+        else:
+            self._render_events(events, image, preview_x, preview_y, preview_p)
+        self.frame.setImage(image, autoLevels=False)
+        truncated = f" / {TRUNCATED_JA}" if detail.features.global_features.event_count > detail.preview_x.size else ""
+        if detail.calibration_remaining_seconds > 0.0:
+            suffix = CALIBRATING_JA.format(
+                seconds=detail.calibration_remaining_seconds,
+            )
+        else:
+            suffix = BACKGROUND_SUBTRACTED_JA.format(count=events.size)
+        self.window_label.setText(
+            f"{WINDOW_JA} #{detail.features.window_index} / "
+            f"{detail.features.duration_s * 1000:.0f} ms / "
+            f"{EVENT_COUNT_JA} {detail.raw_event_count}{truncated} / "
+            f"{suffix}\n{RULE_JA}: {detail.estimate.reason}"
+        )
+
+    @staticmethod
+    def _render_events(
+        events: np.ndarray,
+        image: np.ndarray,
+        x: np.ndarray,
+        y: np.ndarray,
+        p: np.ndarray,
+    ) -> None:
+        """Render non-empty residual events with SDK or the local fallback."""
         try:
             from metavision_sdk_core import BaseFrameGenerationAlgorithm
 
             BaseFrameGenerationAlgorithm.generate_frame(events, image)
         except ImportError:
             image.fill(52)
-            image[detail.preview_y, detail.preview_x] = np.where(
-                detail.preview_p[:, None] == 1,
+            image[y, x] = np.where(
+                p[:, None] == 1,
                 (201, 126, 64),
                 (80, 80, 80),
             )
-        self.frame.setImage(image, autoLevels=False)
-        truncated = f" / {TRUNCATED_JA}" if detail.features.global_features.event_count > detail.preview_x.size else ""
-        self.window_label.setText(
-            f"{WINDOW_JA} #{detail.features.window_index} / "
-            f"{detail.features.duration_s * 1000:.0f} ms / "
-            f"{EVENT_COUNT_JA} {detail.features.global_features.event_count}{truncated}"
-        )

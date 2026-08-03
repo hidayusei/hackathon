@@ -62,3 +62,4 @@ class SourceKind(str, Enum):
     DUMMY = "dummy"
     FILE = "file"
     HDF5 = "hdf5"
+    UDP = "udp"

@@ -312,3 +312,5 @@ class DetailFrame:
     history: list[HistoryEntry]
     rate_series: np.ndarray
     stats: PipelineStats
+    raw_event_count: int
+    calibration_remaining_seconds: float

@@ -14,6 +14,132 @@ from .regions import REGION_ORDER, RegionMap
 from .voxel import voxel_features
 
 
+class BackgroundEventFilter:
+    """Learn a stationary event baseline and retain dense excess activity."""
+
+    def __init__(
+        self,
+        sensor: SensorConfig,
+        calibration_seconds: float,
+        residual_eps: float,
+    ) -> None:
+        self._sensor = sensor
+        self._calibration_seconds = calibration_seconds
+        self._residual_eps = residual_eps
+        self._pixels = sensor.width * sensor.height
+        self.reset()
+
+    def reset(self) -> None:
+        """Clear the learned background and restart calibration."""
+        self._elapsed = 0.0
+        self._samples = 0
+        self._total = np.zeros(self._pixels * 2, dtype=np.float64)
+        self._baseline = np.zeros(self._pixels * 2, dtype=np.float64)
+        self._credit = np.zeros(self._pixels * 2, dtype=np.float64)
+        self._preview_window: EventWindow | None = None
+
+    @property
+    def remaining_seconds(self) -> float:
+        """Return stationary calibration time still required."""
+        return max(0.0, self._calibration_seconds - self._elapsed)
+
+    @property
+    def ready(self) -> bool:
+        """Return whether the stationary background has been learned."""
+        return self.remaining_seconds <= 0.0
+
+    @property
+    def preview_window(self) -> EventWindow | None:
+        """Return the latest per-pixel-subtracted window before rate gating."""
+        return self._preview_window
+
+    @staticmethod
+    def _empty_like(window: EventWindow) -> EventWindow:
+        return EventWindow(
+            np.empty(0, dtype=np.uint16),
+            np.empty(0, dtype=np.uint16),
+            np.empty(0, dtype=np.int64),
+            np.empty(0, dtype=np.int8),
+            window.window_index,
+            window.t_start_us,
+            window.t_end_us,
+            window.duration_s,
+            window.truncated,
+        )
+
+    @staticmethod
+    def _select_counts(
+        window: EventWindow,
+        bins: np.ndarray,
+        keep_counts: np.ndarray,
+    ) -> EventWindow:
+        """Select up to the requested count from every coordinate/polarity bin."""
+        if bins.size == 0 or not np.any(keep_counts):
+            return BackgroundEventFilter._empty_like(window)
+        order = np.argsort(bins, kind="stable")
+        sorted_bins = bins[order]
+        new_group = np.r_[True, sorted_bins[1:] != sorted_bins[:-1]]
+        group_starts = np.maximum.accumulate(
+            np.where(new_group, np.arange(sorted_bins.size), 0)
+        )
+        ranks = np.arange(sorted_bins.size) - group_starts
+        selected = np.sort(order[ranks < keep_counts[sorted_bins]])
+        return EventWindow(
+            window.x[selected].copy(),
+            window.y[selected].copy(),
+            window.t[selected].copy(),
+            window.p[selected].copy(),
+            window.window_index,
+            window.t_start_us,
+            window.t_end_us,
+            window.duration_s,
+            window.truncated,
+        )
+
+    def apply(self, window: EventWindow) -> EventWindow:
+        """Return a background-subtracted window; calibration windows are empty."""
+        spatial = (
+            window.y.astype(np.int64) * self._sensor.width
+            + window.x.astype(np.int64)
+        )
+        bins = window.p.astype(np.int64) * self._pixels + spatial
+        counts = np.bincount(bins, minlength=self._pixels * 2).astype(np.float64)
+        if not self.ready:
+            self._total += counts
+            self._samples += 1
+            self._elapsed += window.duration_s
+            if self.ready and self._samples:
+                self._baseline = self._total / self._samples
+            self._preview_window = self._empty_like(window)
+            return self._preview_window
+
+        available = counts - self._baseline + self._credit
+        residual_counts = np.floor(np.maximum(available, 0.0)).astype(np.int64)
+        self._credit = np.clip(available - residual_counts, 0.0, 1.0)
+        self._preview_window = self._select_counts(window, bins, residual_counts)
+        keep_total = max(
+            0,
+            int(residual_counts.sum() - self._residual_eps * window.duration_s),
+        )
+        if keep_total == 0 or bins.size == 0:
+            return self._empty_like(window)
+
+        active_bins = np.flatnonzero(residual_counts)
+        density_order = active_bins[
+            np.argsort(residual_counts[active_bins], kind="stable")[::-1]
+        ]
+        ordered_counts = residual_counts[density_order]
+        before = np.cumsum(ordered_counts) - ordered_counts
+        keep_by_density = np.minimum(
+            ordered_counts,
+            np.maximum(0, keep_total - before),
+        )
+        keep_counts = np.zeros_like(residual_counts)
+        keep_counts[density_order] = keep_by_density
+
+        return self._select_counts(window, bins, keep_counts)
+
+
 class FeatureExtractor:
     """Convert EventWindow to global and region feature aggregates."""
 
@@ -65,6 +191,10 @@ class FeatureExtractor:
     def last_frame(self) -> FeatureFrame | None:
         """Return the most recently extracted frame."""
         return self._last_frame
+
+    def set_idle_eps(self, idle_eps: float) -> None:
+        """Set the source-profile activity boundary."""
+        self._idle_eps = idle_eps
 
     def extract(self, window: EventWindow) -> FeatureFrame:
         """Extract all status-definition features; raise PipelineError on bad coordinates."""

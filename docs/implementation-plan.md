@@ -27,6 +27,7 @@ Codex 用のプロンプトは `scripts/prompts/migrate-01.md` 〜 `migrate-06.m
 | M04 | Pi ライブ入力 + `source: auto` | M01 | 2.0 h | `migrate-04.md` |
 | M05 | GIF キャラクター + UI 2 画面化 | M03 | 3.0 h | `migrate-05.md` |
 | M06 | ダミーシナリオ・デモ・全体確認 | M05 | 2.0 h | `migrate-06.md` |
+| M07 | 同一 LAN UDP 生イベント転送 | M04 | 2.0 h | – |
 
 合計目安 **12.5 時間**。M01 → M02 → M03 の順は変更しないこと。
 M04 は M01 の後ならいつでも実施できる。
@@ -70,7 +71,7 @@ Raspberry Pi 側の導入は [architecture.md](architecture.md) §26 を参照�
 | `AnimationId` | `RUNNING` / `SITTING` / `SLEEPING` / `BREAK` の 4 値に |
 | `SystemStatus` | `SHARING_OFF` を削除 |
 | `Approachability` | **削除** |
-| `SourceKind` | `AUTO` / `METAVISION` を追加、`WEBSOCKET` / `TCP` / `UDP` / `HTTP` を削除 |
+| `SourceKind` | `AUTO` / `METAVISION` を追加、旧ネットワーク種別を削除（制限付き `UDP` は M07 で再追加） |
 | `StatusSnapshot` | `approachability` / `approachability_label` を削除、`focus_streak_seconds` / `break_due` を追加 |
 | `to_public_dict()` | [status-definition.md](status-definition.md) §9 の 8 キーに |
 | `SmoothedFeatures` | `change_score` を削除 |
@@ -240,6 +241,23 @@ Raspberry Pi 側の導入は [architecture.md](architecture.md) §26 を参照�
 
 ---
 
+### M07: 同一 LAN UDP 生イベント転送
+
+**新規**: `network/udp_protocol.py`, `network/udp_sender.py`, `input/udp_source.py`,
+`tests/test_udp_transport.py`
+
+**変更**: `core/enums.py`, `config/schema.py`, `config/default.yaml`, `input/factory.py`,
+`pipeline/runner.py`, `privacy/guard.py`。
+
+実装順は protocol → PrivacyGuard/config → sender/source → runner/factory → tests。
+テストは既定無効、二重許可、宛先制限、datagram 上限、空/単一/分割 batch、重複、
+順序逆転、欠損タイムアウト、不正 header、送受信 loopback を検証する。
+
+完了条件: `pytest` 全通過、UDP 無効時に socket を生成しない、受信結果の dtype と値が
+元の `EventBatch` に一致する。
+
+---
+
 ## 4. MVP 完了条件
 
 [requirements.md](requirements.md) §9 の DoD-1〜DoD-15。
@@ -261,6 +279,8 @@ Raspberry Pi 側の導入は [architecture.md](architecture.md) §26 を参照�
 | DoD-13 保存が既定無効 | `test_privacy_guard.py` | 既存 |
 | DoD-14 テスト全通過 | `pytest` | M06 |
 | DoD-15 実機でライブ入力 | **人間が実施** | – |
+| DoD-16 UDP 分割・再構成 | `test_udp_transport.py` | M07 |
+| DoD-17 UDP 既定無効・宛先制限 | `test_udp_transport.py` | M07 |
 
 ---
 
@@ -274,7 +294,6 @@ Raspberry Pi 側の導入は [architecture.md](architecture.md) §26 を参照�
 - `pipeline/voxel.py`（Voxel Grid。既定 OFF のまま）
 - `input/dummy_source.py` の生成ロジック（シナリオ定義だけ M06 で変える）
 - `input/file_source.py`
-- `privacy/guard.py`
 - `logging_setup.py`
 - `ui/detail_window.py` と `ui/panels/*`（状態名の表示だけ M05 で追随）
 - `ui/status_stripe.py`（3 色になるだけ）
@@ -289,7 +308,7 @@ Raspberry Pi 側の導入は [architecture.md](architecture.md) §26 を参照�
 
 **変更してはならない決定事項**:
 
-- Raspberry Pi 内で完結する構成（外部送信を作らない）
+- UDP が無効な既定構成では Raspberry Pi 内で完結する
 - 3 状態（離席中 / 集中 / 非集中）と表示名
 - `source: auto` による Pi / Windows 両対応
 - `metavision_core` の遅延 import

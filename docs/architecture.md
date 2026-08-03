@@ -89,7 +89,7 @@ Windows は「開発と UI 確認のための環境」であり、本番実行�
 | 軽量学習モデル（EXT-6） | scikit-learn | >= 1.5 | × |
 
 使ってはならないもの（MVP）: OpenCV、PyTorch、TensorFlow、FastAPI、Flask、requests、
-その他ネットワーク送信を行うライブラリ。
+外部サービス用ネットワークライブラリ。§7.5 の UDP は標準ライブラリ `socket` のみ使う。
 
 ---
 
@@ -103,7 +103,7 @@ Windows は「開発と UI 確認のための環境」であり、本番実行�
         ──────────► │  │   ├ DummyEventSource   [MVP]         │                                │
         (未実装)     │  │   ├ FileEventSource    [MVP]         │  EventBatch                    │
                     │  │   ├ Hdf5EventSource    [EXT-1]       │  ──────────┐                   │
-                    │  │   └ WebSocketEventSource [EXT-2]     │            │                   │
+                    │  │   └ UdpEventSource      [M07]       │            │                   │
                     │  └──────────────────────────────────────┘            ▼                   │
                     │                                         ┌─── PipelineThread (QThread) ──┐ │
                     │                                         │  EventWindower                │ │
@@ -731,8 +731,8 @@ class SourceKind(str, Enum):
     HDF5       = "hdf5"        # EXT-1
 ```
 
-版 1.0 の `websocket` / `tcp` / `udp` / `http` は**削除**する。Pi 内で完結するため
-ネットワーク受信の口を持たない（[privacy-design.md](privacy-design.md) PV-4）。
+`websocket` / `tcp` / `http` は削除する。`udp` は §7.5 の同一 LAN 生イベント転送に限り、
+PC 側の受信 `EventSource` として追加する。
 
 未実装の `SourceKind` を指定した場合、`create_event_source` は `ConfigError` を投げる。
 
@@ -762,6 +762,50 @@ def resolve_source_kind(configured: SourceKind) -> tuple[SourceKind, str]:
   例: `metavision(live)` / `dummy(demo) — metavision_core が見つかりません`。
 - **Windows で開発しているとき、自動的にダミーになる**ので、設定を書き換えずに UI を確認できる。
 - Pi 上で意図せずダミーになっていないか判別できるよう、ウィジェットのツールチップにも入力ソース名を出す。
+
+### 7.5 同一 LAN UDP 生イベント転送
+
+Pi は `MetavisionEventSource` から得た `EventBatch` を通常どおり処理し、送信が明示的に
+有効な場合だけ `UdpEventSender.send(batch)` へ複製する。PC は `input.source: udp` で
+`UdpEventSource` を選び、再構成した `EventBatch` を既存パイプラインへ渡す。
+
+実装ファイル:
+
+- `src/deskmate/network/udp_protocol.py`: wire dtype、header、分割・再構成
+- `src/deskmate/network/udp_sender.py`: `UdpEventSender`
+- `src/deskmate/input/udp_source.py`: `EventSource` 実装
+
+header は network byte order の `!4sBBHIIHHqq` とする。magic=`DMEV`、version=1、
+stream_id、batch_seq、fragment_index、fragment_count、t_start_us、t_end_us を持つ。
+payload は 1 event 13 byte の `x: >u2, y: >u2, t: >i8, p: i1`。datagram は
+`udp.output.max_datagram_bytes`（既定 1200）以下に分割する。空 batch は header のみ送る。
+
+`UdpReassembler` は `(sender address, stream_id, batch_seq)` ごとに fragment を保持し、
+全 fragment が揃った場合だけ時刻順を検証して immutable `EventBatch` を返す。重複 fragment
+は無視し、不整合・上限超過・タイムアウトした batch は全体を破棄する。保持時間は
+`input.udp.reassembly_timeout_ms`、イベント上限は `input.udp.max_batch_events`、未完成 batch
+の保持上限は `input.udp.max_pending_batches` とする。
+
+設定:
+
+```yaml
+input:
+  source: auto
+  udp: {bind_host: "0.0.0.0", allowed_host: "127.0.0.1", port: 5005, reassembly_timeout_ms: 500, max_batch_events: 200000, max_pending_batches: 64}
+udp:
+  output:
+    enabled: false
+    destination_host: "127.0.0.1"
+    destination_port: 5005
+    max_datagram_bytes: 1200
+    stream_id: 1
+privacy:
+  allow_external_send: false
+```
+
+送信先は数値 IPv4 の private/loopback unicast のみ。`PrivacyGuard.assert_can_send_external()`
+が二重許可と宛先を検証する。送信エラーは座標を含めずログに残し、推定処理は継続する。
+UDP は暗号化・認証・再送を提供しないため、信頼できる同一 LAN 専用とする。
 
 ### 7.3 実機データを Windows で読むための経路（重要）
 
@@ -1359,7 +1403,7 @@ class WidgetWindow(QWidget):
 │   ╰──────────╯                                     │
 │ ──────────────────────────────────────────────────  │ 区切り線
 │ ▓▓▓▓▒▒▒▒████░░░░                                   │ 状態履歴ストライプ（10px）
-│ RGB映像は使用していません / 生データは外部送信していません │ プライバシー注記（10px）
+│ RGB映像は使用していません / UDP送信は設定で管理されています │ プライバシー注記（10px）
 └────────────────────────────────────────────────────┘
 ```
 
@@ -1411,7 +1455,7 @@ class WidgetWindow(QWidget):
 
 画面上部に固定表示（`ui/labels.py` の定数）:
 
-- `PRIVACY_NOTICE_JA`（RGB 未使用 / 外部送信なし）
+- `PRIVACY_NOTICE_JA`（RGB 未使用 / UDP 送信は設定で管理）
 - `PRIVACY_CAVEAT_JA`（形状が推測されうる旨）
 - 現在の入力ソース名と `SourceStatus`、`PipelineStats`（処理時間・破棄バッチ数）
 
@@ -1859,32 +1903,11 @@ class PrivacyGuard:
 
 ---
 
-## 20. 将来の Raspberry Pi 入力への差し替え方法
+## 20. Raspberry Pi から PC への入力差し替え
 
-**既存コードの変更は `input/` 以下の 2 箇所のみで済むように設計する。**
-
-手順（EXT-2 時に実施）:
-
-1. `src/deskmate/input/websocket_source.py` を新規作成し、`EventSource` を実装する。
-   - `open()`: WebSocket 接続を確立し、受信スレッドかキューを用意する。
-   - `read(timeout_s)`: 受信キューから 1 バッチ取り出す。空なら `None`。
-   - 受信フォーマットは 2 種を許容する（どちらを使うかは Pi 側実装時に確定）:
-     - JSON 配列: `[{"x":125,"y":210,"t":123456789,"p":1}, ...]` → `EventBatch.from_records()`
-     - バイナリ: `EVENT_DTYPE` のリトルエンディアン連続バイト列 → `np.frombuffer()`
-2. `input/factory.py` の `SOURCE_REGISTRY` に `SourceKind.WEBSOCKET` を登録する。
-3. `config/schema.py` に `WebSocketInputConfig`（`url`, `reconnect`, `binary`）を追加する。
-4. `config/default.yaml` に `input.websocket` セクションを追加する。
-5. 設定の `input.source` を `websocket` に変更する。
-
-**パイプライン・UI・状態推定のコードは一切変更しない。** これが達成できていない場合は設計違反。
-
-Pi 側に要求する仕様（本 MVP の対象外だが、インターフェースの前提として記録する）:
-
-- 送信単位: 10–50 ms 分のイベントをまとめて 1 メッセージ。
-- `t` はセンサ基準の単調増加マイクロ秒。PC 側で壁時計へ変換しない。
-- 座標はセンサ解像度そのまま（リサイズしない）。
-- 欠落検出のため、メッセージにシーケンス番号を含める。
-- 生イベントを Pi 側でファイル保存しない。
+実装済みの §7.5 を使用する。Pi は Metavision 入力、PC は `UdpEventSource` を選ぶ。
+ネットワーク形式を追加する場合も `EventSource` の契約を変えず、UDP 以外は別途プライバシー
+レビューを必要とする。WebSocket/JSON の旧案は廃止する。
 
 ---
 

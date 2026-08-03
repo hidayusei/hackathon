@@ -1,0 +1,13 @@
+input:
+  source: metavision
+
+udp:
+  output:
+    enabled: true
+    destination_host: "163.221.192.32"
+    destination_port: 5005
+    max_datagram_bytes: 1200
+    stream_id: 1
+
+privacy:
+  allow_external_send: true

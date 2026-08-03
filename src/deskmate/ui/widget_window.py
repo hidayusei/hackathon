@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import datetime
 from functools import partial
+from time import monotonic
 
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt, Signal
 from PySide6.QtGui import (
@@ -39,6 +40,7 @@ from .labels import (
     UI_DEBUG_AUTO_JA,
     UI_DEBUG_AWAY_JA,
     UI_DEBUG_BREAK_JA,
+    UI_DEBUG_BREAK_STATUS_JA,
     UI_DEBUG_FOCUSED_JA,
     UI_DEBUG_IDLE_JA,
     UI_DEBUG_MENU_JA,
@@ -67,6 +69,7 @@ class WidgetWindow(QWidget):
         self._last_live_snapshot: StatusSnapshot | None = None
         self._debug_status: DeskStatus | None = None
         self._debug_break = False
+        self._debug_started_monotonic: float | None = None
         self._source_text = "INPUT"
         self._theme = resolve_theme(config.ui.theme)
         self.setWindowFlags(
@@ -201,6 +204,7 @@ class WidgetWindow(QWidget):
         self._last_live_snapshot = snapshot
         if self._debug_status is not None:
             snapshot = self._debug_snapshot(snapshot)
+            self.bridge.set_debug_preview(snapshot)
         self._render_snapshot(snapshot)
 
     def _render_snapshot(self, snapshot: StatusSnapshot) -> None:
@@ -359,6 +363,7 @@ class WidgetWindow(QWidget):
 
         self._debug_status = status
         self._debug_break = break_due
+        self._debug_started_monotonic = monotonic()
         base = self._last_live_snapshot or self._initial_snapshot()
         snapshot = self._debug_snapshot(base)
         self._render_snapshot(snapshot)
@@ -369,6 +374,7 @@ class WidgetWindow(QWidget):
 
         self._debug_status = None
         self._debug_break = False
+        self._debug_started_monotonic = None
         self.bridge.set_debug_preview(None)
         if self._last_live_snapshot is not None:
             self._render_snapshot(self._last_live_snapshot)
@@ -377,15 +383,27 @@ class WidgetWindow(QWidget):
         """Create a UI-only snapshot for deterministic visual inspection."""
 
         status = self._debug_status or base.status
+        duration_seconds = 0.0
+        if self._debug_started_monotonic is not None:
+            duration_seconds = max(
+                0.0,
+                monotonic() - self._debug_started_monotonic,
+            )
+        if self._debug_break:
+            duration_seconds += self.config.debug.break_start_seconds
         return replace(
             base,
             status=status,
             system_status=SystemStatus.RUNNING,
-            label=resolve_label(status),
+            label=(
+                UI_DEBUG_BREAK_STATUS_JA
+                if self._debug_break
+                else resolve_label(status)
+            ),
             animation=resolve_animation(status, self._debug_break, SystemStatus.RUNNING),
-            duration_seconds=1500.0 if self._debug_break else 0.0,
+            duration_seconds=duration_seconds,
             confidence=1.0,
-            focus_streak_seconds=1500.0 if self._debug_break else 0.0,
+            focus_streak_seconds=duration_seconds,
             break_due=self._debug_break,
             changed=True,
         )

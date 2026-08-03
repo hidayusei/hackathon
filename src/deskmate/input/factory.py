@@ -12,6 +12,7 @@ from .dummy_source import DummyEventSource
 from .file_source import FileEventSource
 from .hdf5_source import Hdf5EventSource
 from .metavision_source import MetavisionEventSource
+from .udp_source import UdpEventSource
 
 
 def resolve_source_kind(configured: SourceKind) -> tuple[SourceKind, str]:
@@ -44,6 +45,11 @@ def _metavision(config: InputConfig, sensor: SensorConfig) -> EventSource:
     return MetavisionEventSource(config.metavision, sensor)
 
 
+def _udp(config: InputConfig, sensor: SensorConfig) -> EventSource:
+    del sensor
+    return UdpEventSource(config.udp)
+
+
 SOURCE_REGISTRY: dict[
     SourceKind, Callable[[InputConfig, SensorConfig], EventSource]
 ] = {
@@ -52,6 +58,7 @@ SOURCE_REGISTRY: dict[
     SourceKind.DUMMY: _dummy,
     SourceKind.FILE: _file,
     SourceKind.HDF5: _hdf5,
+    SourceKind.UDP: _udp,
 }
 
 

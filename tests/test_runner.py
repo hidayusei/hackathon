@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from conftest import FakeClock, make_window
+from conftest import FakeClock, make_smoothed, make_window
 from deskmate.config.loader import load_config
 from deskmate.config.schema import DummyInputConfig
 from deskmate.core.enums import DeskStatus
@@ -46,6 +46,63 @@ def test_detail_is_emitted_with_subscription() -> None:
     runner.set_detail_subscription(True)
     runner._process_window(make_window(np.arange(100), np.arange(100)))
     assert len(seen) == 1
+
+
+def test_metavision_background_calibration_feeds_filtered_features() -> None:
+    config = load_config(
+        {
+            "ui": {"detail": {"calibration_seconds": 0.4}},
+            "estimation": {"background_residual_eps": 100.0},
+        }
+    )
+    runner = PipelineRunner(config, FakeClock())
+    runner._background_enabled = True
+    seen = []
+    runner.detail_ready.connect(seen.append)
+    runner.set_detail_subscription(True)
+    stationary_x = np.full(100, 10)
+    stationary_y = np.full(100, 20)
+
+    runner._process_window(make_window(stationary_x, stationary_y))
+    runner._process_window(make_window(stationary_x, stationary_y, index=1))
+    moving_x = np.r_[stationary_x, np.full(200, 30)]
+    moving_y = np.r_[stationary_y, np.full(200, 40)]
+    runner._process_window(make_window(moving_x, moving_y, index=2))
+
+    assert seen[0].calibration_remaining_seconds > 0
+    assert seen[1].calibration_remaining_seconds == 0
+    assert seen[2].raw_event_count == 300
+    assert seen[2].features.global_features.event_count == 180
+    assert seen[2].preview_x.size == 200
+    assert np.all(seen[2].preview_x == 30)
+
+
+def test_metavision_profile_ignores_focus_position_but_dummy_does_not() -> None:
+    runner = PipelineRunner(load_config(), FakeClock())
+    measured = make_smoothed(
+        rate_short=20_000,
+        area_short=0.67,
+        rate_cv_10s=2.0,
+        active_seconds=10.0,
+    )
+    assert runner.estimator.estimate(None, measured).status is DeskStatus.IDLE
+
+    runner._configure_source_profile("metavision(live)")
+
+    assert runner.estimator.estimate(None, measured).status is DeskStatus.FOCUSED
+
+
+def test_metavision_profile_does_not_focus_on_away_residual_rate() -> None:
+    runner = PipelineRunner(load_config(), FakeClock())
+    runner._configure_source_profile("metavision(live)")
+    weak_residual = make_smoothed(
+        rate_short=6_000,
+        area_short=0.60,
+        rate_cv_10s=1.0,
+        active_seconds=20.0,
+    )
+
+    assert runner.estimator.estimate(None, weak_residual).status is DeskStatus.IDLE
 
 
 def test_paused_snapshot_has_paused_system_status() -> None:

@@ -7,7 +7,8 @@ DeskMate はそれらを「見ない」ことを前提に設計する。
 
 > **版 2.0 で最大の変化**: システムが **Raspberry Pi 内で完結**するようになった。
 > PC への送信が無くなり、ネットワークを一切使わない。共有画面も廃止したため、
-> **データが端末の外に出る経路が設計上ひとつも存在しない**。
+> 既定ではデータが端末の外に出ない。二つの設定を明示的に有効化した場合だけ、
+> 同一 LAN の指定 PC へ生イベントを UDP 転送できる。
 
 **重要な前提**: イベントカメラを使っているから安全、とは言わない（§5）。
 本書は「リスクをゼロにする」文書ではなく、「何を取得せず、何を外に出さないか」を明示する文書である。
@@ -21,7 +22,7 @@ DeskMate はそれらを「見ない」ことを前提に設計する。
 | PV-1 | RGB 画像を使用しない | 依存に撮像系ライブラリを入れない。入力は `EventBatch`（x, y, t, p）のみを受け取る型で固定する | `requirements.txt` レビュー、`EventSource` の型 |
 | PV-2 | PC 画面や書類の内容を取得しない | 画面キャプチャ API・ファイル走査・アクティブウィンドウ取得を実装しない | `mss` / `pyautogui` / `win32gui` を import しない |
 | PV-3 | 生のイベントデータを原則保存しない | `privacy.save_raw_events` の既定 `false`。保存は `PrivacyGuard` を通らないと実行できない | `tests/test_privacy_guard.py` |
-| PV-4 | **ネットワーク送信を一切行わない** | 送信系ライブラリを依存に含めない。`SourceKind` から `websocket` / `tcp` / `udp` / `http` を削除済み | 依存レビュー、`SourceKind` の定義 |
+| PV-4 | **UDP 生イベント送信を明示的な二重許可に限定する** | `udp.output.enabled` と `privacy.allow_external_send` が共に true、かつ private/loopback の単一 IPv4 宛先だけ許可 | `tests/test_udp_transport.py` |
 | PV-5 | 状態推定は端末内で完結する | 全処理が `src/deskmate/pipeline/` 内。クラウド API を使わない | 依存レビュー |
 | PV-6 | 詳細画面を閉じている間、点群を生成しない | `DetailFrame` は `set_detail_subscription(True)` の間だけ生成する | `tests/test_runner.py` |
 | PV-7 | ユーザが推定処理を停止できる | ウィジェットの停止ボタン / 右クリックメニュー。停止中は入力の読み取り自体を止める | `tests/test_runner_control.py` |
@@ -73,7 +74,7 @@ L3 に限って外へ出せることとする。
 
 | 表示する | L0〜L3 すべて（本人の端末上、本人だけが見る前提） |
 |--------|---|
-| 必須表示 | `PRIVACY_NOTICE_JA`「RGB映像は使用していません / データはこの端末の外に出ません」 |
+| 必須表示 | `PRIVACY_NOTICE_JA`「RGB映像は使用していません / UDP送信は設定で管理されています」 |
 | 注意 | この画面をプロジェクタや画面共有に映すと L0/L1 が第三者に見える |
 
 ### 3.3 UI に出さないもの（版 2.0 の方針）
@@ -121,7 +122,7 @@ L3 に限って外へ出せることとする。
 | 推奨 | 用途 |
 |------|------|
 | 「RGB映像は使用していません」 | 事実。詳細画面に表示 |
-| 「データはこの端末の外に出ません」 | 事実。詳細画面に表示 |
+| 「UDP送信は設定で管理されています」 | 送信の有無を誤認させない事実。詳細画面に表示 |
 | 「イベントデータからも動きの形状が推測される可能性があります」 | 限界の明示。**README と本書に記載。UI には出さない** |
 | 「離席中」「集中」「非集中」 | 状態名。断定を避けた短い名詞形 |
 | 「そろそろ休憩しませんか」 | 休憩促し。提案であって指示ではない |
@@ -147,23 +148,25 @@ README にも要約を掲載する。**「安全です」で終わらせない�
 
 ## 7. ネットワークについて
 
-**版 2.0 では通信機能を一切実装しない。**
+UDP 生イベント転送だけを例外として実装する。
 
-- 送信・受信を行うライブラリ（requests / httpx / websockets / socket）を依存に含めない。
-- `SourceKind` からネットワーク系の種別を削除済み。
-- 入力は Metavision SDK（ローカルデバイス）・ダミー・ローカルファイルの 3 経路のみ。
-- 将来 EXT-1 で共有機能を作る場合の必須条件:
-  1. 送出できるのは `StatusSnapshot.to_public_dict()` の形式のみ
-  2. 待ち受けはローカルネットワークに限定する
-  3. UI に共有中であることを表示する
+- 既定値は `udp.output.enabled: false`、`privacy.allow_external_send: false`。
+- private または loopback の単一 IPv4 アドレスだけを許可する。ホスト名、broadcast、
+  multicast、unspecified、public IP は拒否する。
+- UDP は暗号化・認証・到達保証を持たない。信頼できない LAN では有効化しない。
+- パケットには座標と時刻が含まれ、動きの形状を再構成できる。送受信側とも保存しない。
+- 欠損 fragment はタイムアウト後に破棄し、ログには座標を出さない。
+- インターネット、クラウド、外部サービスへの送信コードは引き続き禁止する。
 
 ---
 
 ## 8. レビューチェックリスト
 
-- [ ] `requirements.txt` に撮像・画面キャプチャ・ネットワーク送信のライブラリが無い
+- [ ] 追加のネットワーク依存がなく、UDP は標準ライブラリ `socket` のみ
 - [ ] `src/deskmate/` で `mss` / `pyautogui` / `win32gui` / `requests` / `httpx` / `cv2` を import していない
-- [ ] `SourceKind` に `websocket` / `tcp` / `udp` / `http` が無い
+- [ ] `SourceKind.UDP` は受信専用で、その他のネットワーク種別が無い
+- [ ] UDP 送信の既定値が二つとも `false`
+- [ ] 公開 IP・broadcast・multicast・unspecified 宛先が拒否される
 - [ ] `StatusSnapshot` のフィールドが [status-definition.md](status-definition.md) §9 の項目のみである（座標・特徴量が無い）
 - [ ] `privacy.save_raw_events` / `save_features` / `logging.log_features` / `debug.enabled` の既定がすべて `false`
 - [ ] 既定設定で起動 → 5 分放置しても `data/` 配下にファイルが生成されない

@@ -64,6 +64,17 @@ class Hdf5InputConfig(StrictModel):
     loop: bool = False
 
 
+class UdpInputConfig(StrictModel):
+    """Bounded UDP event receiver configuration."""
+
+    bind_host: str = "0.0.0.0"
+    allowed_host: str = "127.0.0.1"
+    port: int = Field(5005, ge=1, le=65535)
+    reassembly_timeout_ms: int = Field(500, ge=1, le=60_000)
+    max_batch_events: int = Field(200_000, ge=1)
+    max_pending_batches: int = Field(64, ge=1, le=4096)
+
+
 class InputConfig(StrictModel):
     """Input selection and recovery configuration."""
 
@@ -77,6 +88,23 @@ class InputConfig(StrictModel):
     dummy: DummyInputConfig = Field(default_factory=DummyInputConfig)
     file: FileInputConfig = Field(default_factory=FileInputConfig)
     hdf5: Hdf5InputConfig = Field(default_factory=Hdf5InputConfig)
+    udp: UdpInputConfig = Field(default_factory=UdpInputConfig)
+
+
+class UdpOutputConfig(StrictModel):
+    """Optional raw-event UDP output, disabled by default."""
+
+    enabled: bool = False
+    destination_host: str = "127.0.0.1"
+    destination_port: int = Field(5005, ge=1, le=65535)
+    max_datagram_bytes: int = Field(1200, ge=64, le=65_507)
+    stream_id: int = Field(1, ge=0, le=4_294_967_295)
+
+
+class UdpConfig(StrictModel):
+    """UDP transport configuration."""
+
+    output: UdpOutputConfig = Field(default_factory=UdpOutputConfig)
 
 
 class PipelineConfig(StrictModel):
@@ -150,6 +178,16 @@ class FeatureConfig(StrictModel):
     voxel: VoxelConfig = Field(default_factory=VoxelConfig)
 
 
+class MetavisionEstimationConfig(StrictModel):
+    """Live-camera overrides calibrated from the installed GenX320 view."""
+
+    idle_eps: float = Field(10_000.0, ge=0.0)
+    focus_min_eps: float = Field(15_000.0, ge=0.0)
+    focus_region_share: float = Field(0.0, ge=0.0, le=1.0)
+    focus_max_bbox_area_ratio: float = Field(0.75, ge=0.0, le=1.0)
+    focus_max_activity_cv: float = Field(3.0, ge=0.0)
+
+
 class EstimationConfig(StrictModel):
     """Three-state rule-estimation configuration."""
 
@@ -167,6 +205,10 @@ class EstimationConfig(StrictModel):
     focus_min_seconds: float = Field(5.0, ge=0.0)
     focus_max_bbox_area_ratio: float = Field(0.20, ge=0.0, le=1.0)
     focus_max_activity_cv: float = Field(0.60, ge=0.0)
+    background_residual_eps: float = Field(15_000.0, ge=0.0)
+    metavision: MetavisionEstimationConfig = Field(
+        default_factory=MetavisionEstimationConfig
+    )
 
 
 class BreakConfig(StrictModel):
@@ -225,6 +267,7 @@ class DetailUiConfig(StrictModel):
     history_seconds: int = Field(300, ge=1)
     refresh_hz: int = Field(10, ge=1)
     character_size: int = Field(120, ge=30)
+    calibration_seconds: float = Field(10.0, ge=0.0)
 
 
 class UiConfig(StrictModel):
@@ -261,6 +304,7 @@ class DebugConfig(StrictModel):
 
     enabled: bool = False
     force_status: DeskStatus | None = None
+    break_start_seconds: float = Field(3000.0, ge=0.0)
 
 
 class AppConfig(StrictModel):
@@ -270,6 +314,7 @@ class AppConfig(StrictModel):
     app: AppSectionConfig = Field(default_factory=AppSectionConfig)
     sensor: SensorConfig = Field(default_factory=SensorConfig)
     input: InputConfig = Field(default_factory=InputConfig)
+    udp: UdpConfig = Field(default_factory=UdpConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
     window: WindowConfig = Field(default_factory=WindowConfig)
     regions: list[RegionConfigItem] = Field(default_factory=default_regions)

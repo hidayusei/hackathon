@@ -23,6 +23,14 @@ input:
     rate_scale: 1.0
   file: {path: null, speed: 1.0, loop: true}
   hdf5: {path: null, events_dataset: /events, speed: 1.0, loop: false}
+  udp: {bind_host: "0.0.0.0", allowed_host: "127.0.0.1", port: 5005, reassembly_timeout_ms: 500, max_batch_events: 200000, max_pending_batches: 64}
+udp:
+  output:
+    enabled: false
+    destination_host: "127.0.0.1"
+    destination_port: 5005
+    max_datagram_bytes: 1200
+    stream_id: 1
 pipeline: {queue_size: 64, queue_overflow: drop_oldest}
 window:
   window_ms: 200
@@ -55,6 +63,13 @@ estimation:
   focus_min_seconds: 5.0
   focus_max_bbox_area_ratio: 0.20
   focus_max_activity_cv: 0.60
+  background_residual_eps: 15000.0
+  metavision:
+    idle_eps: 10000.0
+    focus_min_eps: 15000.0
+    focus_region_share: 0.0
+    focus_max_bbox_area_ratio: 0.75
+    focus_max_activity_cv: 3.0
 break:
   enabled: true
   after_seconds: 1500.0
@@ -83,7 +98,7 @@ ui:
     minimized_size: 96
     last_position: null
     minimized: false
-  detail: {max_preview_points: 200000, history_seconds: 300, refresh_hz: 10, character_size: 120}
+  detail: {max_preview_points: 200000, history_seconds: 300, refresh_hz: 10, character_size: 120, calibration_seconds: 10.0}
 privacy:
   save_raw_events: false
   save_features: false
@@ -97,4 +112,4 @@ logging:
   max_bytes: 1048576
   backup_count: 3
   log_features: false
-debug: {enabled: false, force_status: null}
+debug: {enabled: false, force_status: null, break_start_seconds: 3000}
